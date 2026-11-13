@@ -1,0 +1,38 @@
+{
+  "name": "@hms/db",
+  "version": "1.0.0",
+  "description": "Prisma schema, SQL migrations (platform + hms), and the tenant-scoped client",
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate:new": "prisma migrate dev --create-only",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "migrate:status": "prisma migrate status",
+    "check:policy": "tsx scripts/check-db-policy.ts",
+    "typecheck": "tsc --noEmit",
+    "seed": "tsx scripts/seed.ts",
+    "seed:history": "tsx scripts/seed-history.ts"
+  },
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "@hms/auth": "workspace:*",
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "dotenv": "^18.0.7",
+    "pg": "^8.23.1",
+    "@hms/billing-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/pg": "^8.23.1",
+    "prisma": "7.10.0",
+    "tsx": "^4.23.15"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./defaults": "./src/defaults.ts",
+    "./platform-billing": "./src/platform-billing.ts",
+    "./access": "./src/access.ts"
+  }
+}

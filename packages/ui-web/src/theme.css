@@ -1,0 +1,96 @@
+/* Shared design tokens for every Swasthya web app: "Clinical Slate".
+   A deep navy sidebar, a clean white workspace with hairline borders, and a teal accent for actions and status. */
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+
+  --color-brand-50: #effcfb;
+  --color-brand-100: #d2f6f3;
+  --color-brand-200: #a6ece6;
+  --color-brand-300: #6edad3;
+  --color-brand-400: #3cc2bb;
+  --color-brand-500: #1ca7a1;
+  --color-brand-600: #118987;
+  --color-brand-700: #0f706f;
+  --color-brand-800: #0e5b5c;
+  --color-brand-900: #0d4a4b;
+
+  /* kept as aliases so older markup keeps working; they now point at the new palette */
+  --color-lime-soft: #eef3fb;
+  --color-mint: #a6ece6;
+
+  --color-ink: #0b1b33;
+  --color-muted: #64748b;
+  --color-line: #e2e8f0;
+  --color-surface: #f6f8fb;
+
+  --color-sidebar: #0b1a33;
+  --color-sidebar-raised: #12264a;
+  --color-sidebar-text: #a9b8d1;
+
+  --radius-card: 1rem;
+  --shadow-glow: 0 0 0 4px rgb(60 194 187 / 0.25);
+}
+
+html, body, #root { height: 100%; }
+body {
+  overflow: hidden;
+  background: #ffffff;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--color-brand-200); }
+
+/* ── dark mode ──
+   The app is written with the same utility classes in both modes; dark mode only swaps what the colors mean. */
+.dark {
+  color-scheme: dark;
+  --color-card: #0e1a2e;
+  --color-ink: #e8eef7;
+  --color-muted: #93a4bd;
+  --color-line: #243653;
+  --color-surface: #14233c;
+  --color-sidebar: #070f1f;
+  --color-sidebar-raised: #0e1a2e;
+
+  --color-brand-50: #0e2e30;
+  --color-brand-100: #0f3d3f;
+  --color-brand-200: #155a58;
+  --color-brand-300: #1c7f7b;
+  --color-brand-400: #26a29d;
+  --color-brand-500: #2bb5af;
+  --color-brand-600: #25a09b;
+  --color-brand-700: #1f958f;
+  --color-brand-800: #2aa8a2;
+  --color-brand-900: #5ad6cf;
+
+  --color-red-50: #3a1620; --color-red-100: #4a1c28; --color-red-200: #6b2a3a; --color-red-600: #f87171; --color-red-700: #fca5a5;
+  --color-amber-50: #35290f; --color-amber-100: #43330f; --color-amber-200: #6a5214; --color-amber-700: #fbbf24; --color-amber-800: #fcd34d; --color-amber-900: #fde68a;
+  --color-sky-50: #0f2a3f; --color-sky-100: #12364f; --color-sky-200: #1d4f70; --color-sky-300: #2b6f99; --color-sky-700: #7dd3fc; --color-sky-800: #a5e0fd; --color-sky-900: #bae6fd;
+  --color-emerald-50: #0f3326; --color-emerald-200: #1a5a42; --color-emerald-300: #23805c; --color-emerald-600: #34d399; --color-emerald-700: #6ee7b7; --color-emerald-900: #a7f3d0;
+  --color-red-300: #8a3347; --color-red-900: #fecaca; --color-amber-300: #8a6a1a;
+  --color-slate-50: #14233c; --color-slate-100: #1b2b45; --color-slate-200: #243653; --color-slate-300: #3a4d6b; --color-slate-400: #6c7f9b; --color-slate-500: #8a9bb5; --color-slate-600: #a9b8d1; --color-slate-900: #0a1424;
+  --color-stone-100: #1b2b45; --color-stone-200: #22324d; --color-stone-300: #2c3f5e; --color-stone-600: #a9b8d1;
+}
+.dark body { background: #0a1424; }
+.dark input, .dark textarea, .dark select { color: var(--color-ink); }
+.dark input::placeholder, .dark textarea::placeholder { color: #6c7f9b; }
+.dark input[type="date"], .dark input[type="datetime-local"], .dark input[type="time"] { color-scheme: dark; }
+/* white surfaces become the card color; text-white stays white so buttons and badges keep their contrast */
+.dark .bg-white { background-color: var(--color-card); }
+.dark .hover\:bg-white:hover { background-color: var(--color-card); }
+.dark .bg-white\/90 { background-color: color-mix(in srgb, var(--color-card) 90%, transparent); }
+.dark .bg-white\/70 { background-color: color-mix(in srgb, var(--color-card) 70%, transparent); }
+.dark .bg-white\/60 { background-color: color-mix(in srgb, var(--color-card) 60%, transparent); }
+.dark .ring-white { --tw-ring-color: var(--color-card); }
+
+/* ── accessibility ── */
+:focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }
+html.large-text { font-size: 118%; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.focus\:not-sr-only:focus { position: fixed; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }

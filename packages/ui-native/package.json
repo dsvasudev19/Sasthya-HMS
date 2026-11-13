@@ -1,0 +1,19 @@
+{
+  "name": "@hms/ui-native",
+  "version": "0.0.0",
+  "main": "src/index.tsx",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "private": true,
+  "types": "src/index.tsx",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.18",
+    "typescript": "^7.0.2"
+  }
+}

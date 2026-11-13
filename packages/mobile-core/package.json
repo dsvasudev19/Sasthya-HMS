@@ -1,0 +1,19 @@
+{
+  "name": "@hms/mobile-core",
+  "version": "0.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "private": true,
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "expo-secure-store": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "typescript": "^7.0.2"
+  }
+}

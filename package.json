@@ -3,18 +3,29 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=@hms/api --filter=@hms/worker --filter=@hms/web-admin --filter=@hms/web-platform",
     "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
+    "db:bootstrap": "./infra/postgres/bootstrap.sh",
+    "db:generate": "pnpm --filter @hms/db generate",
+    "db:migrate:new": "pnpm --filter @hms/db migrate:new",
+    "db:migrate:dev": "pnpm --filter @hms/db migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @hms/db migrate:deploy",
+    "db:check": "pnpm --filter @hms/db check:policy",
+    "mobile:staff": "pnpm --filter @hms/mobile-staff start",
+    "mobile:patient": "pnpm --filter @hms/mobile-patient start",
+    "test": "pnpm --filter @hms/api test",
+    "db:seed": "pnpm --filter @hms/db seed",
+    "db:seed:history": "pnpm --filter @hms/db seed:history"
   },
   "devDependencies": {
     "prettier": "3.9.6",
     "turbo": "^2.11.8",
-    "typescript": "7.0.2"
+    "typescript": "~6.0.3"
   },
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@12.0.0",
   "engines": {
-    "node": ">=24"
+    "node": ">=20"
   }
 }

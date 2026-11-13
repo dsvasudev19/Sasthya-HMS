@@ -1,0 +1,4 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@hms/ui-web/theme.css";
+@source "../../../packages/ui-web/src";
