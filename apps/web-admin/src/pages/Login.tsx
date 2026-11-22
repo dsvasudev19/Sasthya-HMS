@@ -8,7 +8,7 @@ export default function Login() {
   const [params] = useSearchParams()
   const wasInactive = params.get('reason') === 'inactivity'
   const { me, login, completeMfa } = useAuth()
-  const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [choices, setChoices] = useState<HospitalChoice[] | null>(null)
   const [challenge, setChallenge] = useState<string | null>(null)
@@ -20,7 +20,7 @@ export default function Login() {
   const go = async (tenantId?: string) => {
     setBusy(true)
     setError('')
-    try { const r = await login(phone, password, tenantId); if (r && 'challenge' in r) setChallenge(r.challenge); else setChoices(r) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+    try { const r = await login(email, password, tenantId); if (r && 'challenge' in r) setChallenge(r.challenge); else setChoices(r) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
   const submit = (e: FormEvent) => { e.preventDefault(); if (challenge) void verify(e); else void go() }
   const verify = async (e: FormEvent) => {
@@ -51,7 +51,7 @@ export default function Login() {
           </>
         ) : choices ? (
           <>
-            <div><h1 className="text-xl font-semibold">Choose a hospital</h1><p className="mt-1 text-sm text-muted">Your number works at more than one hospital.</p></div>
+            <div><h1 className="text-xl font-semibold">Choose a hospital</h1><p className="mt-1 text-sm text-muted">Your account belongs to more than one hospital.</p></div>
             <div className="space-y-2">
               {choices.map((c) => (
                 <button type="button" key={c.tenantId} disabled={busy} onClick={() => void go(c.tenantId)} className="w-full rounded-2xl border-2 border-line p-4 text-left transition hover:border-brand-300">
@@ -63,9 +63,9 @@ export default function Login() {
           </>
         ) : (
           <>
-            <div><h1 className="text-xl font-semibold">Sign in to your hospital</h1><p className="mt-1 text-sm text-muted">Use the mobile number registered by your hospital.</p></div>
-            <Field label="Mobile number"><input className={inputCls} inputMode="numeric" maxLength={10} value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))} autoFocus required /></Field>
-            <Field label="Password"><input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} /></Field>
+            <div><h1 className="text-xl font-semibold">Sign in to your hospital</h1><p className="mt-1 text-sm text-muted">Use the email address registered by your hospital.</p></div>
+            <Field label="Email address"><input className={inputCls} type="email" placeholder="staff@hospital.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus required /></Field>
+            <Field label="Password"><input className={inputCls} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} /></Field>
             {error && <p className="text-sm text-red-600">{error}</p>}
             <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</Button>
             <p className="text-center text-sm text-muted">New hospital or clinic? <Link to="/signup" className="font-semibold text-brand-700 hover:underline">Start a free 30-day trial</Link></p>

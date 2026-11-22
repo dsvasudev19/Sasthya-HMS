@@ -15,7 +15,7 @@ import Roles, { useRoles } from './settings/Roles'
 import { fmtDate, rupees } from '../lib/format'
 import ChangePassword from './ChangePassword'
 
-interface Member { identityId: string; name: string | null; phone: string; roles: string[]; branchIds: string[]; mustChangePassword: boolean }
+interface Member { identityId: string; name: string | null; email?: string | null; phone?: string | null; roles: string[]; branchIds: string[]; mustChangePassword: boolean }
 
 /** Roles come from the hospital's own list. Someone can hand out only roles whose permissions they hold themselves. */
 function RoleChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
@@ -31,12 +31,12 @@ function RoleChips({ value, onChange }: { value: string[]; onChange: (v: string[
   )
 }
 
-function Secret({ title, phone, password, onClose }: { title: string; phone: string; password: string; onClose: () => void }) {
+function Secret({ title, account, password, onClose }: { title: string; account: string; password: string; onClose: () => void }) {
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-4 text-sm">
         <p>Share this with the person now. It is shown <b>only once</b>, and they must choose their own password when they first sign in.</p>
-        <div className="rounded-2xl bg-surface p-4"><p className="text-xs text-muted">Mobile number</p><p className="font-semibold">{phone}</p><p className="mt-3 text-xs text-muted">Temporary password</p><p className="select-all font-mono text-lg font-bold tracking-wider">{password}</p></div>
+        <div className="rounded-2xl bg-surface p-4"><p className="text-xs text-muted">Sign-in account</p><p className="font-semibold">{account}</p><p className="mt-3 text-xs text-muted">Temporary password</p><p className="select-all font-mono text-lg font-bold tracking-wider">{password}</p></div>
         <Button className="w-full" onClick={onClose}>Done</Button>
       </div>
     </Modal>
@@ -56,18 +56,18 @@ function Team() {
   const { data } = useQuery({ queryKey: ['team'], queryFn: () => api<{ members: Member[]; seats: { used: number; limit: number } }>('/team') })
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<Member | null>(null)
-  const [secret, setSecret] = useState<{ title: string; phone: string; password: string } | null>(null)
-  const [f, setF] = useState({ fullName: '', phone: '', roles: [] as string[] })
+  const [secret, setSecret] = useState<{ title: string; account: string; password: string } | null>(null)
+  const [f, setF] = useState({ fullName: '', email: '', phone: '', roles: [] as string[] })
   const [roles, setRoles] = useState<string[]>([])
   const done = () => qc.invalidateQueries({ queryKey: ['team'] })
 
   const add = useMutation({
-    mutationFn: () => api<{ phone: string; temporaryPassword?: string }>('/team', { method: 'POST', body: JSON.stringify(f) }),
-    onSuccess: (r) => { done(); setAdding(false); if (r.temporaryPassword) setSecret({ title: 'Account created', phone: r.phone, password: r.temporaryPassword }); setF({ fullName: '', phone: '', roles: [] }) },
+    mutationFn: () => api<{ identityId: string; email?: string; phone?: string; temporaryPassword?: string }>('/team', { method: 'POST', body: JSON.stringify(f) }),
+    onSuccess: (r) => { done(); setAdding(false); if (r.temporaryPassword) setSecret({ title: 'Account created', account: r.email || r.phone || f.email, password: r.temporaryPassword }); setF({ fullName: '', email: '', phone: '', roles: [] }) },
   })
   const save = useMutation({ mutationFn: () => api(`/team/${editing!.identityId}/roles`, { method: 'PUT', body: JSON.stringify({ roles }) }), onSuccess: () => { done(); setEditing(null) } })
   const remove = useMutation({ mutationFn: (id: string) => api(`/team/${id}`, { method: 'DELETE' }), onSuccess: done })
-  const reset = useMutation({ mutationFn: (m: Member) => api<{ temporaryPassword: string }>(`/team/${m.identityId}/reset-password`, { method: 'POST', body: '{}' }).then((r) => ({ m, r })), onSuccess: ({ m, r }) => setSecret({ title: 'Password reset', phone: m.phone, password: r.temporaryPassword }) })
+  const reset = useMutation({ mutationFn: (m: Member) => api<{ temporaryPassword: string }>(`/team/${m.identityId}/reset-password`, { method: 'POST', body: '{}' }).then((r) => ({ m, r })), onSuccess: ({ m, r }) => setSecret({ title: 'Password reset', account: m.email || m.phone || '', password: r.temporaryPassword }) })
   const submit = (e: FormEvent) => { e.preventDefault(); add.mutate() }
   const err = (add.error || save.error || remove.error || reset.error) as Error | null
 
@@ -80,14 +80,14 @@ function Team() {
       {err && <p className="mb-3 text-sm text-red-600">{err.message}</p>}
       <div className="overflow-x-auto rounded-2xl ring-1 ring-line">
         <table className="w-full min-w-[640px] text-left text-sm">
-          <thead className="bg-surface text-xs font-semibold"><tr>{['Name', 'Mobile', 'Roles', ''].map((h) => <th key={h} className="px-4 py-3.5">{h}</th>)}</tr></thead>
+          <thead className="bg-surface text-xs font-semibold"><tr>{['Name', 'Email / Phone', 'Roles', ''].map((h) => <th key={h} className="px-4 py-3.5">{h}</th>)}</tr></thead>
           <tbody className="divide-y divide-line">
             {data?.members.map((m) => {
               const locked = !can('roles:manage') && m.roles.some((r) => r === 'OWNER' || r === 'ADMIN')
               return (
                 <tr key={m.identityId}>
                   <td className="px-4 py-3.5 font-medium">{m.name}{m.identityId === me?.user.id && <span className="ml-2 rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-semibold text-brand-700">You</span>}{m.mustChangePassword && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">Not signed in yet</span>}</td>
-                  <td className="px-4 py-3.5 text-muted">{m.phone}</td>
+                  <td className="px-4 py-3.5 text-muted">{m.email || m.phone || '-'}</td>
                   <td className="px-4 py-3.5"><div className="flex flex-wrap gap-1.5">{m.roles.map((r) => <span key={r} className="rounded-full bg-surface px-2.5 py-1 text-xs font-semibold ring-1 ring-line">{roleLabel(r)}</span>)}</div></td>
                   <td className="px-2 py-3.5 text-right">
                     {!locked && m.identityId !== me?.user.id && (
@@ -106,14 +106,16 @@ function Team() {
           </tbody>
         </table>
       </div>
+      {secret && <Secret title={secret.title} account={secret.account} password={secret.password} onClose={() => setSecret(null)} />}
       {adding && (
         <Modal title="Add staff" onClose={() => setAdding(false)}>
           <form onSubmit={submit} className="space-y-4">
             <Field label="Full name"><input className={inputCls} required minLength={2} value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} autoFocus /></Field>
-            <Field label="Mobile number"><input className={inputCls} inputMode="numeric" maxLength={10} required value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '') })} /></Field>
+            <Field label="Email address"><input className={inputCls} type="email" required placeholder="doctor@hospital.com" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
+            <Field label="Mobile number (optional)"><input className={inputCls} inputMode="numeric" maxLength={10} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '') })} /></Field>
             <Field label="Roles"><RoleChips value={f.roles} onChange={(v) => setF({ ...f, roles: v })} /></Field>
             {add.error && <p className="text-sm text-red-600">{(add.error as Error).message}</p>}
-            <Button type="submit" className="w-full" disabled={f.roles.length === 0 || f.phone.length !== 10 || add.isPending}>Create account</Button>
+            <Button type="submit" className="w-full" disabled={f.roles.length === 0 || !f.email || add.isPending}>Create account</Button>
           </form>
         </Modal>
       )}

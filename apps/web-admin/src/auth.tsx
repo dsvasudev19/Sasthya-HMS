@@ -30,7 +30,7 @@ interface AuthState {
   me: Me | null
   loading: boolean
   /** Returns the hospitals to choose from when the account belongs to several. */
-  login: (phone: string, password: string, tenantId?: string) => Promise<HospitalChoice[] | { challenge: string } | null>
+  login: (email: string, password: string, tenantId?: string) => Promise<HospitalChoice[] | { challenge: string } | null>
   completeMfa: (challenge: string, code: string) => Promise<void>
   apply: (r: Me & { token: string }) => void
   logout: () => Promise<void>
@@ -102,9 +102,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [me])
 
-  const login = useCallback(async (phone: string, password: string, tenantId?: string) => {
+  const login = useCallback(async (email: string, password: string, tenantId?: string) => {
     try {
-      const r = await api<(Me & { token: string }) | { mfaRequired: true; challenge: string }>('/auth/login', { method: 'POST', body: JSON.stringify({ phone, password, tenantId }) })
+      const payload = email.includes('@') ? { email: email.trim().toLowerCase(), password, tenantId } : { phone: email.trim(), password, tenantId }
+      const r = await api<(Me & { token: string }) | { mfaRequired: true; challenge: string }>('/auth/login', { method: 'POST', body: JSON.stringify(payload) })
       if ('mfaRequired' in r) return { challenge: r.challenge }
       apply(r)
       return null

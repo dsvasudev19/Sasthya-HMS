@@ -43,13 +43,19 @@ export default async function authRoutes(app: FastifyInstance, { db, secret, pro
     };
   };
 
-  // ── hospital staff: phone + password ──
+  // ── hospital staff: email (or phone) + password ──
   app.post("/auth/login", { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } }, async (req, reply) => {
     const input = loginInput.parse(req.body);
-    const identity = await db.identity.findUnique({ where: { phone: input.phone }, include: { memberships: { include: { tenant: true } } } });
-    // Same response for unknown phone and wrong password.
+    const identity = await db.identity.findFirst({
+      where: input.email ? { email: input.email } : { phone: input.phone },
+      include: { memberships: { include: { tenant: true } } },
+    });
+    // Same response for unknown account and wrong password.
     const ok = identity?.passwordHash ? await verifyPassword(input.password, identity.passwordHash) : false;
-    if (!identity || !ok) { logEvent({ level: "SECURITY", source: "auth", message: "Failed staff sign-in", ip: req.ip, meta: { phoneEnding: input.phone.slice(-4), known: !!identity } }); return reply.code(401).send({ error: "Invalid phone or password" }); }
+    if (!identity || !ok) {
+      logEvent({ level: "SECURITY", source: "auth", message: "Failed staff sign-in", ip: req.ip, meta: { account: input.email ?? input.phone, known: !!identity } });
+      return reply.code(401).send({ error: "Invalid email or password" });
+    }
 
     const byTenant = new Map<string, { tenantId: string; name: string; roles: Role[] }>();
     for (const m of identity.memberships.filter((x) => x.tenant.status !== "CLOSED")) {
@@ -138,10 +144,18 @@ export default async function authRoutes(app: FastifyInstance, { db, secret, pro
   };
 
   app.post("/auth/platform/login", async (req, reply) => {
-    const { phone, password } = z.object({ phone: z.string().regex(/^\d{10}$/), password: z.string().min(1).max(128) }).parse(req.body);
-    const identity = await db.identity.findUnique({ where: { phone }, include: { platformAdmins: true } });
+    const { email, phone, password } = z.object({
+      email: z.string().trim().email().toLowerCase().optional(),
+      phone: z.string().regex(/^\d{10}$/).optional(),
+      password: z.string().min(1).max(128),
+    }).refine((d) => !!d.email || !!d.phone, { message: "Email or phone is required" }).parse(req.body);
+
+    const identity = await db.identity.findFirst({
+      where: email ? { email } : { phone },
+      include: { platformAdmins: true },
+    });
     const ok = identity?.passwordHash ? await verifyPassword(password, identity.passwordHash) : false;
-    if (!identity || !ok || identity.platformAdmins.length === 0) return reply.code(401).send({ error: "Invalid phone or password" });
+    if (!identity || !ok || identity.platformAdmins.length === 0) return reply.code(401).send({ error: "Invalid email or password" });
     return platformSession(reply, identity.id, clientOf(req.body));
   });
 
@@ -150,15 +164,22 @@ export default async function authRoutes(app: FastifyInstance, { db, secret, pro
     const input = signupInput.parse(req.body);
     if (!(await platformFlags(db)).get("signup_open")?.enabled) throw httpError(403, "New sign-ups are paused for now. Please contact Swasthya.");
     if (!(await consumeOtp(input.phone, input.code))) return reply.code(401).send({ error: "Wrong or expired code" });
-    let identity = await db.identity.findUnique({ where: { phone: input.phone } });
+    let identity = await db.identity.findFirst({
+      where: {
+        OR: [
+          { phone: input.phone },
+          ...(input.email ? [{ email: input.email }] : []),
+        ],
+      },
+    });
     if (identity?.passwordHash) {
       // Someone who already runs a hospital here can open another one with their existing password.
-      if (!(await verifyPassword(input.password, identity.passwordHash))) throw httpError(409, "This number already has an account. Use your existing password, or sign in.");
+      if (!(await verifyPassword(input.password, identity.passwordHash))) throw httpError(409, "This account already has a password. Use your existing password, or sign in.");
     } else {
       const hash = await hashPassword(input.password);
       identity = identity
-        ? await db.identity.update({ where: { id: identity.id }, data: { passwordHash: hash, fullName: identity.fullName ?? input.ownerName } })
-        : await db.identity.create({ data: { phone: input.phone, fullName: input.ownerName, passwordHash: hash } });
+        ? await db.identity.update({ where: { id: identity.id }, data: { passwordHash: hash, fullName: identity.fullName ?? input.ownerName, ...(input.email && !identity.email ? { email: input.email } : {}) } })
+        : await db.identity.create({ data: { phone: input.phone, email: input.email, fullName: input.ownerName, passwordHash: hash } });
     }
     const trialDays = Number((await platformFlags(db)).get("trial_days")?.value?.["days"] ?? TRIAL_DAYS);
     const tenant = await provisionTenant(db, { name: input.hospitalName, kind: input.kind, planCode: input.planCode, status: "TRIAL", trialDays, ownerIdentityId: identity.id });

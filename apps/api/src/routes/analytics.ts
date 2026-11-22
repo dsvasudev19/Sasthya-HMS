@@ -89,7 +89,7 @@ export default async function analyticsRoutes(app: FastifyInstance, { db }: { db
   app.get("/analytics/organization", { preHandler: staffGuard("team:manage") }, async (req) => {
     const tid = staff(req).tid;
     const week = new Date(Date.now() - 7 * DAY), month = new Date(Date.now() - 30 * DAY);
-    const members = await db.tenantMembership.findMany({ where: { tenantId: tid }, include: { identity: { select: { id: true, fullName: true, phone: true } } } });
+    const members = await db.tenantMembership.findMany({ where: { tenantId: tid }, include: { identity: { select: { id: true, fullName: true, phone: true, email: true } } } });
     const people = [...new Set(members.map((m) => m.identityId))];
     const sessions = await db.refreshToken.groupBy({ by: ["identityId"], where: { tenantId: tid, kind: "staff", identityId: { in: people } }, _max: { createdAt: true } });
     const lastIn = new Map(sessions.map((x) => [x.identityId, x._max.createdAt]));
@@ -111,7 +111,7 @@ export default async function analyticsRoutes(app: FastifyInstance, { db }: { db
     return {
       seats: { used: people.length, limit: seatLimit(effectivePlan(t), t.maxSeats) },
       people: { total: people.length, activeLast7d: out.active, neverSignedIn: people.filter((id) => !lastIn.has(id)).length, idle30d: idle.length,
-        idleList: idle.slice(0, 8).map((id) => { const m = members.find((x) => x.identityId === id)!; return { id, name: m.identity.fullName, phone: `••••${m.identity.phone.slice(-4)}`, lastSignIn: lastIn.get(id) ?? null, roles: members.filter((x) => x.identityId === id).map((x) => x.role) }; }) },
+        idleList: idle.slice(0, 8).map((id) => { const m = members.find((x) => x.identityId === id)!; return { id, name: m.identity.fullName, phone: m.identity.phone ? `••••${m.identity.phone.slice(-4)}` : (m.identity.email ?? ""), lastSignIn: lastIn.get(id) ?? null, roles: members.filter((x) => x.identityId === id).map((x) => x.role) }; }) },
       access: { roles: byRole, customRoles: roles.filter((r) => !r.isSystem).length, policies: policies.length, policiesOn: policies.filter((p) => p.enabled).length },
       security: { eventsLast7d: fails },
       recentAccessChanges: out.changes.map((c) => ({ id: c.id, action: c.action, by: c.actorIdentityId ? who.get(c.actorIdentityId) ?? null : null, at: c.createdAt })),

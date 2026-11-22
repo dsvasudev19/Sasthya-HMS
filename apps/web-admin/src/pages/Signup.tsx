@@ -14,7 +14,7 @@ const PLANS = [
 
 export default function Signup() {
   const { me, apply } = useAuth()
-  const [f, setF] = useState({ hospitalName: '', kind: 'HOSPITAL' as 'HOSPITAL' | 'CLINIC' | 'PHARMACY', ownerName: '', phone: '', planCode: 'STARTER' as (typeof PLANS)[number]['value'], code: '', password: '' })
+  const [f, setF] = useState({ hospitalName: '', kind: 'HOSPITAL' as 'HOSPITAL' | 'CLINIC' | 'PHARMACY', ownerName: '', email: '', phone: '', planCode: 'STARTER' as (typeof PLANS)[number]['value'], code: '', password: '' })
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -34,7 +34,7 @@ export default function Signup() {
     setBusy(true); setError('')
     try { apply(await api<Me & { token: string }>('/signup', { method: 'POST', body: JSON.stringify(f) })) } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
-  const ready = f.hospitalName.length >= 3 && f.ownerName.length >= 2 && f.phone.length === 10
+  const ready = f.hospitalName.length >= 3 && f.ownerName.length >= 2 && f.email.includes('@') && f.phone.length === 10
 
   return (
     <div className="min-h-screen overflow-auto bg-gradient-to-br from-[#0b1a33] via-[#10294f] to-[#0d4a4b] p-4">
@@ -44,6 +44,7 @@ export default function Signup() {
         <Field label="Hospital or clinic name"><input className={inputCls} value={f.hospitalName} onChange={(e) => setF({ ...f, hospitalName: e.target.value })} disabled={sent} autoFocus /></Field>
         <Field label="We are a"><Select value={f.kind} onChange={(v) => setF({ ...f, kind: v })} disabled={sent} options={[{ value: 'HOSPITAL', label: 'Hospital (several staff)' }, { value: 'CLINIC', label: 'Clinic (a doctor on their own)' }, { value: 'PHARMACY', label: 'Medical store / pharmacy only' }]} /></Field>
         <Field label="Your name"><input className={inputCls} value={f.ownerName} onChange={(e) => setF({ ...f, ownerName: e.target.value })} disabled={sent} /></Field>
+        <Field label="Your official email (used to sign in)"><input className={inputCls} type="email" placeholder="admin@hospital.com" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} disabled={sent} required /></Field>
         <Field label="Your mobile number"><input className={inputCls} inputMode="numeric" maxLength={10} value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value.replace(/\D/g, '') })} disabled={sent} /></Field>
         <Field label="Plan after the trial"><Select value={f.planCode} onChange={(v) => setF({ ...f, planCode: v })} disabled={sent} options={PLANS.map((p) => ({ value: p.value, label: p.label, hint: p.hint }))} /></Field>
         {sent && (

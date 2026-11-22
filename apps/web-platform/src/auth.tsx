@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { api, refreshSession, session } from './lib/api'
 
 interface Operator { user: { id: string; name: string | null } }
-interface AuthState { me: Operator | null; loading: boolean; login: (phone: string, password: string) => Promise<void>; logout: () => Promise<void> }
+interface AuthState { me: Operator | null; loading: boolean; login: (email: string, password: string) => Promise<void>; logout: () => Promise<void> }
 const Ctx = createContext<AuthState | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -34,8 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       events.forEach((ev) => window.removeEventListener(ev, reset))
     }
   }, [me])
-  const login = useCallback(async (phone: string, password: string) => {
-    const r = await api<Operator & { token: string }>('/auth/platform/login', { method: 'POST', body: JSON.stringify({ phone, password }) })
+  const login = useCallback(async (email: string, password: string) => {
+    const r = await api<Operator & { token: string }>('/auth/platform/login', { method: 'POST', body: JSON.stringify({ email: email.trim().toLowerCase(), password }) })
     session.setToken(r.token)
     setMe({ user: r.user })
   }, [])

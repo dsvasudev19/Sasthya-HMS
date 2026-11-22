@@ -24,9 +24,9 @@ export default async function teamRoutes(app: FastifyInstance, { db }: { db: Pri
   const list = async (tenantId: string) => {
     const rows = await db.tenantMembership.findMany({ where: { tenantId }, include: { identity: true }, orderBy: { createdAt: "asc" } });
     const branches = await db.staffBranch.findMany({ where: { tenantId } });
-    const by = new Map<string, { identityId: string; name: string | null; phone: string; roles: Role[]; branchIds: string[]; mustChangePassword: boolean }>();
+    const by = new Map<string, { identityId: string; name: string | null; email: string | null; phone: string | null; roles: Role[]; branchIds: string[]; mustChangePassword: boolean }>();
     for (const m of rows) {
-      const e = by.get(m.identityId) ?? { identityId: m.identityId, name: m.identity.fullName, phone: m.identity.phone, roles: [], branchIds: branches.filter((b) => b.identityId === m.identityId).map((b) => b.branchId), mustChangePassword: m.identity.mustChangePassword };
+      const e = by.get(m.identityId) ?? { identityId: m.identityId, name: m.identity.fullName, email: m.identity.email, phone: m.identity.phone, roles: [], branchIds: branches.filter((b) => b.identityId === m.identityId).map((b) => b.branchId), mustChangePassword: m.identity.mustChangePassword };
       e.roles.push(m.role as Role);
       by.set(m.identityId, e);
     }
@@ -45,7 +45,9 @@ export default async function teamRoutes(app: FastifyInstance, { db }: { db: Pri
     if (!(await mayGrant(req, tenantId, input.roles))) throw httpError(403, "You cannot give a role that grants more than you have");
     const t = await tenantInfo(db, tenantId);
     const members = await list(tenantId);
-    const existing = await db.identity.findUnique({ where: { phone: input.phone } });
+    const existing = await db.identity.findFirst({
+      where: input.email ? { email: input.email } : { phone: input.phone },
+    });
     const already = existing ? members.find((m) => m.identityId === existing.id) : undefined;
     if (!already && members.length >= seatLimit(effectivePlan(t), t.maxSeats)) throw Object.assign(httpError(402, `Your plan allows ${seatLimit(effectivePlan(t), t.maxSeats)} staff accounts. Upgrade to add more.`), { extra: { code: "UPGRADE", feature: "seats" } });
 
@@ -53,10 +55,26 @@ export default async function teamRoutes(app: FastifyInstance, { db }: { db: Pri
     let identity = existing;
     if (!identity) {
       temp = temporaryPassword();
-      identity = await db.identity.create({ data: { phone: input.phone, fullName: input.fullName, passwordHash: await hashPassword(temp), mustChangePassword: true } });
+      identity = await db.identity.create({
+        data: {
+          email: input.email,
+          phone: input.phone,
+          fullName: input.fullName,
+          passwordHash: await hashPassword(temp),
+          mustChangePassword: true,
+        },
+      });
     } else if (!identity.passwordHash) {
       temp = temporaryPassword(); // a patient who is now joining the staff
-      identity = await db.identity.update({ where: { id: identity.id }, data: { passwordHash: await hashPassword(temp), mustChangePassword: true, fullName: identity.fullName ?? input.fullName } });
+      identity = await db.identity.update({
+        where: { id: identity.id },
+        data: {
+          passwordHash: await hashPassword(temp),
+          mustChangePassword: true,
+          fullName: identity.fullName ?? input.fullName,
+          ...(input.email && !identity.email ? { email: input.email } : {}),
+        },
+      });
     }
     const have = new Set(already?.roles ?? []);
     const add = input.roles.filter((r) => !have.has(r));
@@ -67,7 +85,7 @@ export default async function teamRoutes(app: FastifyInstance, { db }: { db: Pri
       await db.staffBranch.createMany({ data: valid.map((b) => ({ tenantId, identityId: identity!.id, branchId: b.id })), skipDuplicates: true });
     }
     clearAuthzCache(tenantId);
-    return reply.code(201).send({ identityId: identity.id, phone: identity.phone, roles: [...have, ...add], temporaryPassword: temp });
+    return reply.code(201).send({ identityId: identity.id, email: identity.email, phone: identity.phone, roles: [...have, ...add], temporaryPassword: temp });
   });
 
   const lastOwnerGuard = async (tenantId: string, identityId: string) => {

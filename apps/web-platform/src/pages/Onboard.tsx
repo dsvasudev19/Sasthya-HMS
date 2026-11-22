@@ -7,7 +7,7 @@ import { Button, inputCls, Select } from '@hms/ui-web'
 import { api } from '../lib/api'
 
 interface Catalog { catalog: { key: string; label: string; description: string; group: string }[]; plans: { code: string; label: string; features: string[] }[] }
-interface Result { tenant: { id: string; name: string; status: string; trialEndsAt: string | null }; owner: { name: string; phone: string; temporaryPassword?: string; existingAccount: boolean } }
+interface Result { tenant: { id: string; name: string; status: string; trialEndsAt: string | null }; owner: { name: string; email?: string; phone?: string; temporaryPassword?: string; existingAccount: boolean } }
 type Kind = 'HOSPITAL' | 'CLINIC' | 'PHARMACY'
 type AgKind = 'MSA' | 'DPA' | 'ORDER_FORM'
 interface Ag { on: boolean; version: string; signedByName: string; signedByTitle: string; signedByEmail: string; signedAt: string; effectiveFrom: string; termMonths: string; autoRenew: boolean; documentRef: string }
@@ -92,7 +92,7 @@ export default function Onboard() {
   const create = useMutation({
     mutationFn: () => api<Result>('/platform/tenants', { method: 'POST', body: JSON.stringify({
       name: f.name, kind: f.kind, planCode: f.planCode, status: f.status, trialDays: Number(f.trialDays) || 30, branchName: f.branchName || undefined, note: f.note || undefined,
-      owner: { name: f.adminName, phone: f.adminPhone },
+      owner: { name: f.adminName, email: f.adminEmail, phone: f.adminPhone || undefined },
       profile: { legalName: f.legalName, entityType: f.entityType, registrationNo: f.registrationNo, drugLicenceNo: f.drugLicenceNo, gstin: f.gstin, pan: f.pan, addressLine1: f.addressLine1, addressLine2: f.addressLine2, city: f.city, state: f.state, pincode: f.pincode, contactEmail: f.contactEmail, contactPhone: f.contactPhone, website: f.website, bedCount: f.bedCount ? Number(f.bedCount) : undefined, adminDesignation: f.adminDesignation, adminEmail: f.adminEmail, billingEmail: f.billingEmail, billingContact: f.billingContact },
       agreements: (Object.entries(f.ag) as [AgKind, Ag][]).filter(([, a]) => a.on).map(([kind, a]) => ({ kind, version: a.version, signedByName: a.signedByName, signedByTitle: a.signedByTitle, signedByEmail: a.signedByEmail, signedAt: new Date(a.signedAt).toISOString(), effectiveFrom: a.effectiveFrom, termMonths: Number(a.termMonths), autoRenew: a.autoRenew, documentRef: a.documentRef })),
       features: Object.entries(f.flip).filter(([k, v]) => v !== planOn(k)).map(([feature, enabled]) => ({ feature, enabled })),
@@ -102,13 +102,14 @@ export default function Onboard() {
   })
 
   if (result) {
-    const text = `${result.tenant.name}\nOrganization admin: ${result.owner.name}\nMobile number: ${result.owner.phone}\n${result.owner.temporaryPassword ? `Temporary password: ${result.owner.temporaryPassword}\nThey must choose their own password at first sign-in.` : 'They sign in with their existing password.'}`
+    const adminContact = result.owner.email || result.owner.phone || ''
+    const text = `${result.tenant.name}\nOrganization admin: ${result.owner.name}\nSign-in email: ${result.owner.email || f.adminEmail}\n${result.owner.phone ? `Mobile number: ${result.owner.phone}\n` : ''}${result.owner.temporaryPassword ? `Temporary password: ${result.owner.temporaryPassword}\nThey must choose their own password at first sign-in.` : 'They sign in with their existing password.'}`
     return (
       <div className="mx-auto max-w-xl py-10 text-sm">
         <p className="mb-6 flex items-center gap-2 rounded-xl bg-brand-50 px-4 py-3 font-semibold text-brand-800"><Check size={16} /> {result.tenant.name} has been onboarded.</p>
         <div className="space-y-1 rounded-2xl bg-surface p-5 ring-1 ring-line">
-          <p className="text-xs text-muted">Organization admin</p><p className="font-semibold">{result.owner.name} · {result.owner.phone}</p>
-          {result.owner.temporaryPassword ? <><p className="pt-3 text-xs text-muted">Temporary password. This is shown once and cannot be retrieved later.</p><p className="select-all font-mono text-xl font-bold tracking-wider">{result.owner.temporaryPassword}</p></> : <p className="pt-2 text-muted">This number already has an account, so their current password still works.</p>}
+          <p className="text-xs text-muted">Organization admin</p><p className="font-semibold">{result.owner.name} · {adminContact}</p>
+          {result.owner.temporaryPassword ? <><p className="pt-3 text-xs text-muted">Temporary password. This is shown once and cannot be retrieved later.</p><p className="select-all font-mono text-xl font-bold tracking-wider">{result.owner.temporaryPassword}</p></> : <p className="pt-2 text-muted">This account already exists, so their current password still works.</p>}
         </div>
         <p className="mt-4 text-muted">The organization admin now controls the organization's roles, permissions, access policies and staff accounts, within the modules and limits you set.</p>
         <div className="mt-5 flex gap-2">

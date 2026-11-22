@@ -58,7 +58,7 @@ export default async function platformOpsRoutes(app: FastifyInstance, { db }: { 
       status: z.enum(["TRIAL", "ACTIVE"]).default("TRIAL"),
       trialDays: z.number().int().min(1).max(365).default(TRIAL_DAYS),
       branchName: z.string().trim().min(2).max(100).optional(),
-      owner: z.object({ name: z.string().trim().min(2).max(100), phone }),
+      owner: z.object({ name: z.string().trim().min(2).max(100), email: z.string().trim().email().toLowerCase().optional(), phone: phone.optional() }).refine((d) => !!d.email || !!d.phone, { message: "Owner email or phone is required" }),
       profile: profileShape,
       agreements: z.array(agreementShape).min(1, "Record the signed agreement before creating the account").max(6),
       features: z.array(z.object({ feature: z.enum(FEATURE_KEYS), enabled: z.boolean() })).default([]),
@@ -67,20 +67,38 @@ export default async function platformOpsRoutes(app: FastifyInstance, { db }: { 
     }).parse(req.body);
     needsLicences(input.kind, input.profile);
     if (!input.agreements.some((a) => a.kind === "MSA")) throw httpError(400, "A master services agreement is required");
-    const existing = await db.identity.findUnique({ where: { phone: input.owner.phone } });
+    const existing = await db.identity.findFirst({
+      where: {
+        OR: [
+          ...(input.owner.email ? [{ email: input.owner.email }] : []),
+          ...(input.owner.phone ? [{ phone: input.owner.phone }] : []),
+        ],
+      },
+    });
     // A person who already has a password keeps it; a new owner gets a temporary one, shown once, that they must change at first sign-in.
     let temp: string | undefined;
     const identity = existing?.passwordHash
       ? existing
-      : await (async () => { temp = temporaryPassword(); const passwordHash = await hashPassword(temp); const data = { passwordHash, mustChangePassword: true, fullName: existing?.fullName ?? input.owner.name }; return existing ? db.identity.update({ where: { id: existing.id }, data }) : db.identity.create({ data: { phone: input.owner.phone, ...data } }); })();
+      : await (async () => {
+          temp = temporaryPassword();
+          const passwordHash = await hashPassword(temp);
+          const data = {
+            passwordHash,
+            mustChangePassword: true,
+            fullName: existing?.fullName ?? input.owner.name,
+            email: input.owner.email ?? input.profile.adminEmail ?? undefined,
+            phone: input.owner.phone,
+          };
+          return existing ? db.identity.update({ where: { id: existing.id }, data }) : db.identity.create({ data });
+        })();
     const tenant = await provisionTenant(db, { name: input.name, kind: input.kind, planCode: input.planCode, status: input.status, trialDays: input.trialDays, ownerIdentityId: identity.id, branchName: input.branchName });
     const op = platformUser(req).sub;
     await db.tenantProfile.create({ data: { tenantId: tenant.id, ...input.profile, adminEmail: input.profile.adminEmail ?? undefined, updatedBy: op } });
     await db.tenantAgreement.createMany({ data: input.agreements.map((a) => ({ ...a, tenantId: tenant.id, recordedBy: op })) });
     if (input.features.length) await db.tenantFeatureOverride.createMany({ data: input.features.map((f) => ({ tenantId: tenant.id, feature: f.feature, enabled: f.enabled, reason: "Set at onboarding", setBy: op })) });
     if (input.limits && (input.limits.maxSeats || input.limits.maxBranches)) await db.tenantLimits.create({ data: { tenantId: tenant.id, maxSeats: input.limits.maxSeats ?? null, maxBranches: input.limits.maxBranches ?? null, notes: input.note, updatedBy: op } });
-    await operatorAudit(db, req, "tenant.onboard", { tenantId: tenant.id, type: "tenant", id: tenant.id, meta: { name: tenant.name, legalName: input.profile.legalName, agreements: input.agreements.map((a) => `${a.kind} v${a.version}`), kind: tenant.kind, plan: tenant.planCode, status: tenant.status, owner: input.owner.phone.slice(-4), note: input.note } });
-    return reply.code(201).send({ tenant: { id: tenant.id, name: tenant.name, kind: tenant.kind, slug: tenant.slug, status: tenant.status, planCode: tenant.planCode, trialEndsAt: tenant.trialEndsAt }, owner: { name: identity.fullName, phone: input.owner.phone, temporaryPassword: temp, existingAccount: !temp } });
+    await operatorAudit(db, req, "tenant.onboard", { tenantId: tenant.id, type: "tenant", id: tenant.id, meta: { name: tenant.name, legalName: input.profile.legalName, agreements: input.agreements.map((a) => `${a.kind} v${a.version}`), kind: tenant.kind, plan: tenant.planCode, status: tenant.status, owner: input.owner.email ?? input.owner.phone, note: input.note } });
+    return reply.code(201).send({ tenant: { id: tenant.id, name: tenant.name, kind: tenant.kind, slug: tenant.slug, status: tenant.status, planCode: tenant.planCode, trialEndsAt: tenant.trialEndsAt }, owner: { name: identity.fullName, email: identity.email ?? input.owner.email, phone: identity.phone ?? input.owner.phone, temporaryPassword: temp, existingAccount: !temp } });
   });
 
   // ── organisation record and agreements ──
@@ -163,8 +181,8 @@ export default async function platformOpsRoutes(app: FastifyInstance, { db }: { 
   app.get("/platform/tenants/:id/users", async (req) => {
     const { id } = idParam.parse(req.params);
     const rows = await db.tenantMembership.findMany({ where: { tenantId: id }, include: { identity: true }, orderBy: { createdAt: "asc" } });
-    const by = new Map<string, { identityId: string; name: string | null; phone: string; roles: string[]; mustChangePassword: boolean; hasPassword: boolean; since: Date }>();
-    for (const m of rows) { const e = by.get(m.identityId) ?? { identityId: m.identityId, name: m.identity.fullName, phone: m.identity.phone, roles: [], mustChangePassword: m.identity.mustChangePassword, hasPassword: !!m.identity.passwordHash, since: m.createdAt }; e.roles.push(m.role); by.set(m.identityId, e); }
+    const by = new Map<string, { identityId: string; name: string | null; email: string | null; phone: string | null; roles: string[]; mustChangePassword: boolean; hasPassword: boolean; since: Date }>();
+    for (const m of rows) { const e = by.get(m.identityId) ?? { identityId: m.identityId, name: m.identity.fullName, email: m.identity.email, phone: m.identity.phone, roles: [] as string[], mustChangePassword: m.identity.mustChangePassword, hasPassword: !!m.identity.passwordHash, since: m.createdAt }; e.roles.push(m.role); by.set(m.identityId, e); }
     const sessions = await db.refreshToken.groupBy({ by: ["identityId"], where: { tenantId: id, revokedAt: null, expiresAt: { gt: new Date() } }, _count: { _all: true }, _max: { createdAt: true } });
     return [...by.values()].map((u) => ({ ...u, activeSessions: sessions.find((s) => s.identityId === u.identityId)?._count._all ?? 0, lastSignIn: sessions.find((s) => s.identityId === u.identityId)?._max.createdAt ?? null }));
   });

@@ -135,12 +135,13 @@ model Tenant {
   @@schema("platform")
 }
 
-// A person known to the platform (verified by phone OTP). One identity can belong to many tenants.
+// A person known to the platform (verified by email or phone OTP). One identity can belong to many tenants.
 model Identity {
   id                 String   @id @default(uuid(7)) @db.Uuid
-  phone              String   @unique
+  email              String?  @unique
+  phone              String?  @unique
   fullName           String?  @map("full_name")
-  // Staff sign in with phone + password; patients use phone OTP and have no password.
+  // Staff sign in with email + password; patients use phone OTP or email.
   passwordHash       String?  @map("password_hash")
   mustChangePassword Boolean  @default(false) @map("must_change_password")
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

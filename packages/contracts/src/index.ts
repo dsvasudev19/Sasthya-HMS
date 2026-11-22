@@ -25,10 +25,11 @@ export const patientDto = z.object({
 export type PatientDto = z.infer<typeof patientDto>;
 
 export const loginInput = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number"),
-  password: z.string().min(8).max(128),
+  email: z.string().trim().email("Enter a valid email address").toLowerCase().optional(),
+  phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number").optional(),
+  password: z.string().min(1).max(128),
   tenantId: z.string().uuid().optional(),
-});
+}).refine((d) => !!d.email || !!d.phone, { message: "Email or phone is required" });
 export type LoginInput = z.infer<typeof loginInput>;
 
 export const appointmentStatusSchema = z.enum(["SCHEDULED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED", "CANCELLED", "NO_SHOW"]);
@@ -263,6 +264,7 @@ export const signupInput = z.object({
   hospitalName: z.string().trim().min(3).max(100),
   kind: z.enum(["HOSPITAL", "CLINIC", "PHARMACY"]),
   ownerName: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().toLowerCase().optional(),
   phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number"),
   code: z.string().regex(/^\d{6}$/),
   password: passwordRule,
@@ -271,11 +273,12 @@ export const signupInput = z.object({
 });
 const roleKey = z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9_]{1,30}$/);
 export const teamAddInput = z.object({
-  phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number"),
+  email: z.string().trim().email("Enter a valid email address").toLowerCase().optional(),
+  phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number").optional(),
   fullName: z.string().trim().min(2).max(100),
   roles: z.array(roleKey).min(1).max(4),
   branchIds: z.array(z.string().uuid()).max(100).optional(),
-});
+}).refine((d) => !!d.email || !!d.phone, { message: "Email or phone is required" });
 export const teamRolesInput = z.object({ roles: z.array(roleKey).min(1).max(4) });
 export const subscriptionPlanInput = z.object({ planCode: planCodeSchema });
 export const platformTenantPatch = z.object({

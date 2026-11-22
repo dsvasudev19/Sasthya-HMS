@@ -24,10 +24,11 @@ export default async function mfaRoutes(app: FastifyInstance, { db, secret }: { 
     const id = staff(req).sub;
     const existing = await db.identityMfa.findUnique({ where: { identityId: id } });
     if (existing?.enabledAt) throw httpError(409, "Two-step sign-in is already on. Turn it off first to set it up again");
-    const identity = await db.identity.findUniqueOrThrow({ where: { id }, select: { phone: true } });
+    const identity = await db.identity.findUniqueOrThrow({ where: { id }, select: { email: true, phone: true } });
     const s = newSecret();
     await db.identityMfa.upsert({ where: { identityId: id }, create: { identityId: id, secretEnc: seal(secret, s) }, update: { secretEnc: seal(secret, s), lastStep: null, recoveryHashes: [] } });
-    return { secret: s, otpauthUrl: otpauthUrl(s, `${identity.phone.slice(-4).padStart(10, "•")}`) };
+    const label = identity.email ?? (identity.phone ? `${identity.phone.slice(-4).padStart(10, "•")}` : "Staff");
+    return { secret: s, otpauthUrl: otpauthUrl(s, label) };
   });
 
   // Step 2: prove the app works by entering a code. Recovery codes are shown once.
@@ -61,9 +62,9 @@ export default async function mfaRoutes(app: FastifyInstance, { db, secret }: { 
   // ── the organization's rule, and help for someone who has lost their phone ──
   app.get("/security/policy", { preHandler: staffGuard("security:manage") }, async (req) => {
     const tenantId = staff(req).tid;
-    const [pol, members] = await Promise.all([db.tenantSecurity.findUnique({ where: { tenantId } }), db.tenantMembership.findMany({ where: { tenantId }, include: { identity: { select: { id: true, fullName: true, phone: true, mfa: { select: { enabledAt: true } } } } } })]);
+    const [pol, members] = await Promise.all([db.tenantSecurity.findUnique({ where: { tenantId } }), db.tenantMembership.findMany({ where: { tenantId }, include: { identity: { select: { id: true, fullName: true, phone: true, email: true, mfa: { select: { enabledAt: true } } } } } })]);
     const people = [...new Map(members.map((m) => [m.identityId, m])).values()];
-    return { require2fa: !!pol?.require2fa, people: people.map((m) => ({ identityId: m.identityId, name: m.identity.fullName, phone: `••••${m.identity.phone.slice(-4)}`, enrolled: !!m.identity.mfa?.enabledAt })) };
+    return { require2fa: !!pol?.require2fa, people: people.map((m) => ({ identityId: m.identityId, name: m.identity.fullName, phone: m.identity.phone ? `••••${m.identity.phone.slice(-4)}` : (m.identity.email ?? ""), enrolled: !!m.identity.mfa?.enabledAt })) };
   });
   app.put("/security/policy", { preHandler: staffGuard("security:manage") }, async (req) => {
     const { require2fa } = z.object({ require2fa: z.boolean() }).parse(req.body);
