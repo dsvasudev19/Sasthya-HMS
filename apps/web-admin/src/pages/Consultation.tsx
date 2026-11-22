@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, Camera, FileDown, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BookOpen, Camera, FileDown, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth'
@@ -11,6 +11,7 @@ import TeleCall from '../components/TeleCall'
 import Select from '../components/Select'
 import { Avatar, Button, Field, inputCls, StatusBadge } from '../components/ui'
 import { api, openFile } from '../lib/api'
+import { CLINICAL_TEMPLATES, COMMON_ICD10_CODES, QUICK_DOSES, QUICK_INSTRUCTIONS } from '../lib/clinicalTemplates'
 import { ageOf, fmtDate, rupees } from '../lib/format'
 import type { ConsultationBundle, LabTest, RxItem, Vitals } from '../lib/types'
 
@@ -42,6 +43,20 @@ export default function Consultation() {
   const [picked, setPicked] = useState<string[]>([])
   const [loaded, setLoaded] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [icdQuery, setIcdQuery] = useState('')
+
+  const filteredIcd = useMemo(() => {
+    if (!icdQuery.trim()) return COMMON_ICD10_CODES.slice(0, 14)
+    const q = icdQuery.toLowerCase()
+    return COMMON_ICD10_CODES.filter((c) => c.code.toLowerCase().includes(q) || c.description.toLowerCase().includes(q))
+  }, [icdQuery])
+
+  const historyQuery = useQuery({
+    queryKey: ['patient-alert-summary', data?.appointment?.patient?.id],
+    queryFn: () => api<{ patient: { allergies: string[]; chronicConditions: string[] } }>(`/patients/${data!.appointment.patient.id}/history`),
+    enabled: !!data?.appointment?.patient?.id,
+  })
+  const patientAlerts = historyQuery.data?.patient
 
   useEffect(() => {
     if (!data || loaded) return
@@ -110,6 +125,48 @@ export default function Consultation() {
         {a.feeWaived && <span className="rounded-full bg-brand-100 px-3 py-1 text-xs font-semibold text-brand-700">Card covered</span>}
       </div>
 
+      {patientAlerts && ((patientAlerts.allergies && patientAlerts.allergies.length > 0) || (patientAlerts.chronicConditions && patientAlerts.chronicConditions.length > 0)) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border-2 border-red-300 bg-red-50/90 p-4 text-sm shadow-sm print:hidden">
+          <AlertTriangle className="size-5 shrink-0 text-red-600 animate-pulse" />
+          <div className="flex-1 min-w-0">
+            {patientAlerts.allergies && patientAlerts.allergies.length > 0 && (
+              <p className="font-bold text-red-800">
+                ⚠️ DRUG / SUBSTANCE ALLERGIES: <span className="underline">{patientAlerts.allergies.join(', ')}</span>
+              </p>
+            )}
+            {patientAlerts.chronicConditions && patientAlerts.chronicConditions.length > 0 && (
+              <p className="text-xs text-red-700 mt-0.5">
+                Chronic Health Conditions: <span className="font-semibold">{patientAlerts.chronicConditions.join(', ')}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!locked && isDoctor && (
+        <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-4 shadow-sm print:hidden">
+          <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand-800 mb-2">
+            <Sparkles size={14} className="text-brand-600" /> One-Click Clinical Note Templates:
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {CLINICAL_TEMPLATES.map((tmpl) => (
+              <button
+                key={tmpl.name}
+                type="button"
+                onClick={() => {
+                  setComplaints(tmpl.complaints)
+                  setDiagnosis(tmpl.diagnosis)
+                  setAdvice(tmpl.advice)
+                }}
+                className="rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-semibold text-brand-800 hover:border-brand-500 hover:bg-brand-100 transition shadow-xs"
+              >
+                + {tmpl.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {a.channel === 'TELE' && <TeleCall appointmentId={a.id} locked={!!c?.completedAt} />}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -128,9 +185,42 @@ export default function Consultation() {
           </section>
 
           <section className="space-y-4 rounded-2xl p-5 ring-1 ring-line">
-            <Field label="Complaints"><textarea className={`${inputCls} min-h-20`} disabled={locked || !isDoctor} value={complaints} onChange={(e) => setComplaints(e.target.value)} /></Field>
-            <Field label="Diagnosis"><textarea className={`${inputCls} min-h-16`} disabled={locked || !isDoctor} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} /></Field>
-            <Field label="Advice"><textarea className={`${inputCls} min-h-16`} disabled={locked || !isDoctor} value={advice} onChange={(e) => setAdvice(e.target.value)} /></Field>
+            <Field label="Complaints"><textarea className={`${inputCls} min-h-20`} disabled={locked || !isDoctor} value={complaints} onChange={(e) => setComplaints(e.target.value)} placeholder="Patient complaints, symptoms, duration..." /></Field>
+            <Field label="Diagnosis (ICD-10 / Clinical)">
+              <div className="space-y-2">
+                <textarea className={`${inputCls} min-h-16`} disabled={locked || !isDoctor} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder="e.g. Essential hypertension (I10), Acute pharyngitis (J02.9)..." />
+                {!locked && isDoctor && (
+                  <div className="rounded-xl border border-line bg-surface p-2.5 print:hidden">
+                    <div className="flex items-center justify-between text-xs font-semibold text-muted mb-1.5">
+                      <span className="flex items-center gap-1 text-slate-700"><BookOpen size={13} className="text-brand-700" /> Standard ICD-10 Diagnosis Codes:</span>
+                      <input
+                        value={icdQuery}
+                        onChange={(e) => setIcdQuery(e.target.value)}
+                        placeholder="Search ICD-10 code/condition..."
+                        className="rounded-lg border border-line bg-white px-2 py-0.5 text-xs outline-none focus:border-brand-500 w-48"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1 max-h-32 overflow-y-auto pt-0.5">
+                      {filteredIcd.map((c) => (
+                        <button
+                          key={c.code}
+                          type="button"
+                          onClick={() => {
+                            const snippet = `${c.code} - ${c.description}`
+                            setDiagnosis((d) => (d.trim() ? `${d.trim()}; ${snippet}` : snippet))
+                          }}
+                          className="rounded-lg border border-line bg-white px-2 py-1 text-[11px] text-ink hover:border-brand-500 hover:bg-brand-50 transition text-left"
+                          title={`Add ${c.code} (${c.category})`}
+                        >
+                          <span className="font-mono font-bold text-brand-700">{c.code}</span> {c.description}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Field>
+            <Field label="Advice & Instructions"><textarea className={`${inputCls} min-h-16`} disabled={locked || !isDoctor} value={advice} onChange={(e) => setAdvice(e.target.value)} placeholder="Dietary restrictions, precautions, lifestyle advice..." /></Field>
             <Field label="Follow-up on"><input type="date" className={inputCls} disabled={locked || !isDoctor} value={followUp} onChange={(e) => setFollowUp(e.target.value)} /></Field>
           </section>
 
@@ -153,6 +243,36 @@ export default function Consultation() {
                     <input className={`${inputCls} !py-2`} placeholder="Qty" inputMode="numeric" disabled={locked} value={it.quantity} onChange={(e) => setItem(i, { quantity: Math.max(1, Number(e.target.value.replace(/\D/g, '')) || 1) })} />
                   </div>
                   <input className={`${inputCls} mt-2 !py-2`} placeholder="Instructions (after food…)" disabled={locked} value={it.instructions ?? ''} onChange={(e) => setItem(i, { instructions: e.target.value })} />
+                  {!locked && (
+                    <div className="mt-2 space-y-1.5 pt-1 border-t border-slate-100 print:hidden">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-[10px] text-muted font-medium">Quick Dose:</span>
+                        {QUICK_DOSES.map((qd) => (
+                          <button
+                            key={qd}
+                            type="button"
+                            onClick={() => setItem(i, { dose: qd })}
+                            className={clsx('rounded px-1.5 py-0.5 text-[10px] transition', it.dose === qd ? 'bg-brand-700 text-white font-bold' : 'bg-white border border-line text-slate-600 hover:bg-slate-100')}
+                          >
+                            {qd}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="text-[10px] text-muted font-medium">Instructions:</span>
+                        {QUICK_INSTRUCTIONS.map((qi) => (
+                          <button
+                            key={qi}
+                            type="button"
+                            onClick={() => setItem(i, { instructions: qi })}
+                            className={clsx('rounded px-1.5 py-0.5 text-[10px] transition', it.instructions === qi ? 'bg-brand-700 text-white font-bold' : 'bg-white border border-line text-slate-600 hover:bg-slate-100')}
+                          >
+                            {qi}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
               {items.length === 0 && <p className="text-sm text-muted">No medicines yet.</p>}

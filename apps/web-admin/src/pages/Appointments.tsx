@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { CalendarDays, ChevronLeft, ChevronRight, List, Plus, Video } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, List, Plus, Tv, Video } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
 import AppointmentsTable from '../components/AppointmentsTable'
 import NewAppointmentModal from '../components/NewAppointmentModal'
@@ -101,6 +101,9 @@ export default function Appointments() {
           <button onClick={() => setV('calendar')} className={clsx('rounded-lg p-2', view === 'calendar' ? 'bg-white text-brand-700 shadow-sm' : 'text-muted')} aria-label="Calendar view" title="Calendar"><CalendarDays size={16} /></button>
           <button onClick={() => setV('list')} className={clsx('rounded-lg p-2', view === 'list' ? 'bg-white text-brand-700 shadow-sm' : 'text-muted')} aria-label="List view" title="List"><List size={16} /></button>
         </div>
+        <Link to="/queue-display" target="_blank" className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-surface">
+          <Tv size={14} className="text-brand-700" /> TV Board
+        </Link>
         <Button onClick={() => setAdding({})}><Plus size={16} /> Add appointment</Button>
       </div>
       {view === 'calendar' ? <DayCalendar date={date} rows={data} onBook={(doctorId, at) => setAdding({ doctorId, at })} /> : <AppointmentsTable rows={data} />}

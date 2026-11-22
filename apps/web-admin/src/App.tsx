@@ -37,6 +37,7 @@ import Tasks from './pages/Tasks'
 import VerifyRx from './pages/VerifyRx'
 import Tele from './pages/Tele'
 import Workspace from './pages/Workspace'
+import QueueDisplay from './pages/QueueDisplay'
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
 
@@ -58,6 +59,7 @@ export default function App() {
             <Route path="/verify/:tenantId/:code" element={<VerifyRx />} />
             <Route path="/f/:tenantId/:token" element={<GiveFeedback />} />
             <Route element={<Protected />}>
+              <Route path="queue-display" element={<QueueDisplay />} />
               <Route path="pharmacy/*" element={<PharmacyApp />} />
               <Route element={<Layout />}>
               <Route index element={<Workspace />} />

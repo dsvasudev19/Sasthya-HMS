@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { AlertTriangle, ArrowRight, CalendarPlus, CheckCircle2, ClipboardList, Clock, FlaskConical, IndianRupee, Receipt, Stethoscope, UserPlus, Users, Video, Wallet } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarPlus, CheckCircle2, ClipboardList, Clock, FlaskConical, IndianRupee, Receipt, Stethoscope, Tv, UserPlus, Users, Video, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth'
@@ -70,6 +70,7 @@ export default function Workspace() {
   const inbox = useQuery({ queryKey: ['inbox', branchId], queryFn: () => api<Inbox>('/inbox'), refetchInterval: 60_000 })
   const tasks = useQuery({ queryKey: ['tasks', 'dash'], queryFn: () => api<TaskRow[]>('/tasks?scope=mine&status=OPEN') })
   const checkIn = useMutation({ mutationFn: (id: string) => api(`/appointments/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'CHECKED_IN' }) }), onSuccess: () => { for (const k of ['overview', 'today', 'appointments']) qc.invalidateQueries({ queryKey: [k] }) } })
+  const callNext = useMutation({ mutationFn: (id: string) => api(`/appointments/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'IN_PROGRESS' }) }), onSuccess: () => { for (const k of ['overview', 'today', 'appointments']) qc.invalidateQueries({ queryKey: [k] }) } })
   const finish = useMutation({ mutationFn: (id: string) => api(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'DONE' }) }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['tasks'] }); qc.invalidateQueries({ queryKey: ['overview'] }); qc.invalidateQueries({ queryKey: ['inbox'] }) } })
 
   const hour = new Date().getHours()
@@ -77,16 +78,32 @@ export default function Workspace() {
   const v = d?.visits, m = d?.money
   const queue = d?.queue ?? []
   const col = (s: Q['status']) => queue.filter((q) => q.status === s)
+  const nextWaiting = queue.find((q) => q.status === 'CHECKED_IN')
   const clinical = can('clinical:read')
   const att = d?.attention ?? {}
 
   return (
     <div className="space-y-6 pb-6">
-      <div className="flex flex-wrap items-end gap-4">
+      <div className="flex flex-wrap items-end gap-3">
         <div className="mr-auto">
           <h1 className="text-2xl font-bold tracking-tight">{hello}, {me?.user.name?.replace(/^Dr\.?\s+/i, '').split(' ')[0]}</h1>
           <p className="text-sm text-muted">{new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} · {branchId === 'all' ? 'All branches' : branch?.name ?? me?.tenant.name}</p>
         </div>
+        <Link to="/queue-display" target="_blank" className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-surface">
+          <Tv size={14} className="text-brand-700" /> Waiting Room TV Board
+        </Link>
+        {clinical && nextWaiting && (
+          <Button
+            disabled={callNext.isPending}
+            onClick={async () => {
+              await callNext.mutateAsync(nextWaiting.id)
+              nav(`/consult/${nextWaiting.id}`)
+            }}
+            className="bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
+          >
+            <Stethoscope size={16} /> Call Token #{nextWaiting.tokenNo}: {nextWaiting.patient.fullName}
+          </Button>
+        )}
         {can('patients:write') && <Button variant="ghost" onClick={() => setModal('patient')}><UserPlus size={16} /> Register patient</Button>}
         {can('billing:write') && <Button variant="ghost" onClick={() => setModal('bill')}><Receipt size={16} /> New bill</Button>}
         {can('appointments:write') && <Button onClick={() => setModal('appt')}><CalendarPlus size={16} /> New appointment</Button>}
