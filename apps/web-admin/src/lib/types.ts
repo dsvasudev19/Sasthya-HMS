@@ -5,6 +5,8 @@ export interface PatientRow {
   gender: 'FEMALE' | 'MALE' | 'OTHER' | null
   dateOfBirth: string | null
   phone: string | null
+  abhaNumber?: string | null
+  abhaAddress?: string | null
   createdAt: string
 }
 

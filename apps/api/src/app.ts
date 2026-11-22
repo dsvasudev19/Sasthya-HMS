@@ -44,6 +44,7 @@ import historyRoutes from "./routes/history";
 import patientClinicalRoutes from "./routes/patientClinical";
 import rxRoutes from "./routes/rx";
 import printableRoutes from "./routes/printables";
+import abdmRoutes from "./routes/abdm";
 import scanRoutes from "./routes/scan";
 import setupRoutes from "./routes/setup";
 import rateLimit from "@fastify/rate-limit";
@@ -126,6 +127,7 @@ export async function buildApp(db: PrismaClient, opts: { jwtSecret: string; prov
   await app.register(taskRoutes, { db });
   await app.register(scanRoutes, { db });
   await app.register(printableRoutes, { db });
+  await app.register(abdmRoutes, { db });
   await app.register(setupRoutes, { db, messagingLive: opts.messagingLive ?? false, paymentsLive: !!opts.gateway });
   await app.register(rxRoutes, { db });
   await app.register(teleRoutes, { db });

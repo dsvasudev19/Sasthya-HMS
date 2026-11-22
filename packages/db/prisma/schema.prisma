@@ -128,6 +128,9 @@ model Tenant {
   security               TenantSecurity?
   tenantFeatureOverrides TenantFeatureOverride[]
   profile                TenantProfile?
+  abdmConfig             AbdmFacilityConfig?
+  careContexts           AbdmCareContext[]
+  consentArtifacts       AbdmConsentArtifact[]
   agreements             TenantAgreement[]
   tenantLimits           TenantLimits[]
 
@@ -229,6 +232,8 @@ model Patient {
   dispenses      Dispense[]
   labOrders      LabOrder[]
   messages       Message[]
+  careContexts   AbdmCareContext[]
+  consents       AbdmConsentArtifact[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, patientNo])
@@ -1284,6 +1289,7 @@ model DoctorProfile {
   specialty        String?
   qualification    String?
   registrationNo   String?  @map("registration_no")
+  hprId            String?  @map("hpr_id")
   feeInPersonPaise Int?     @map("fee_in_person_paise")
   feeTelePaise     Int?     @map("fee_tele_paise")
   slotMinutes      Int      @default(15) @map("slot_minutes")
@@ -2406,4 +2412,71 @@ model TenantSecurity {
 
   @@map("tenant_security")
   @@schema("platform")
+}
+
+// ── ABDM (Ayushman Bharat Digital Mission) Compliance ──
+
+// ABDM Facility Registry (HFR) and gateway bridge settings per hospital
+model AbdmFacilityConfig {
+  tenantId      String   @id @map("tenant_id") @db.Uuid
+  hfrFacilityId String?  @map("hfr_facility_id") // National Health Facility Registry ID e.g. IN2910001234
+  facilityName  String?  @map("facility_name")
+  hipId         String?  @map("hip_id") // Health Information Provider ID
+  clientId      String?  @map("client_id")
+  clientSecret  String?  @map("client_secret")
+  sandbox       Boolean  @default(true)
+  active        Boolean  @default(true)
+  updatedBy     String?  @map("updated_by") @db.Uuid
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("abdm_facility_configs")
+  @@schema("hms")
+}
+
+// ABDM Care Contexts linking consultations, admissions, and reports to a patient's ABHA
+model AbdmCareContext {
+  id                String    @id @default(uuid(7)) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  patientId         String    @map("patient_id") @db.Uuid
+  careContextRef    String    @map("care_context_ref") // e.g. OPD-TOKEN-12, ADM-2026-0001
+  careContextType   String    @map("care_context_type") // OP_CONSULTATION, DISCHARGE_SUMMARY, DIAGNOSTIC_REPORT, PRESCRIPTION
+  display           String
+  linkedAbhaAddress String?   @map("linked_abha_address")
+  linkedAt          DateTime? @map("linked_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, patientId, careContextRef])
+  @@index([tenantId, patientId])
+  @@map("abdm_care_contexts")
+  @@schema("hms")
+}
+
+// ABDM Consent Artifacts for health information exchange (M3)
+model AbdmConsentArtifact {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  consentId String   @map("consent_id")
+  patientId String?  @map("patient_id") @db.Uuid
+  status    String   @default("GRANTED") // REQUESTED, GRANTED, DENIED, REVOKED, EXPIRED
+  purpose   String   @default("CAETR") // Care Management (CAETR), Emergency (BTG), etc.
+  hiTypes   String[] @default(["OPConsultation", "Prescription", "DischargeSummary"]) @map("hi_types")
+  dateFrom  DateTime @map("date_from") @db.Timestamptz(3)
+  dateTo    DateTime @map("date_to") @db.Timestamptz(3)
+  expiry    DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  patient Patient? @relation(fields: [tenantId, patientId], references: [tenantId, id])
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, consentId])
+  @@index([tenantId, patientId])
+  @@map("abdm_consent_artifacts")
+  @@schema("hms")
 }

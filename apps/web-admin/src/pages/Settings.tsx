@@ -12,6 +12,7 @@ import Branches from './settings/Branches'
 import Doctors from './settings/Doctors'
 import Policies from './settings/Policies'
 import Roles, { useRoles } from './settings/Roles'
+import Abdm from './settings/Abdm'
 import { fmtDate, rupees } from '../lib/format'
 import ChangePassword from './ChangePassword'
 
@@ -251,6 +252,7 @@ const TABS = [
   { k: 'policies', label: 'Policies', perm: 'policies:manage' },
   { k: 'branches', label: 'Branches', perm: 'branches:manage' },
   { k: 'doctors', label: 'Doctors', perm: 'doctors:manage' },
+  { k: 'abdm', label: 'ABDM & Compliance', perm: 'settings:write' },
   { k: 'subscription', label: 'Plan and billing', perm: 'team:manage' },
   { k: 'profile', label: 'Hospital profile', perm: 'settings:write' },
 ] as const
@@ -271,7 +273,7 @@ export default function Settings() {
           ))}
         </div>
       </div>
-      {tab === 'team' ? <Team /> : tab === 'roles' ? <Roles /> : tab === 'policies' ? <Policies /> : tab === 'branches' ? <Branches /> : tab === 'doctors' ? <Doctors /> : tab === 'subscription' ? <Subscription /> : tab === 'profile' ? <Profile /> : <p className="text-sm text-muted">You do not have access to any settings.</p>}
+      {tab === 'team' ? <Team /> : tab === 'roles' ? <Roles /> : tab === 'policies' ? <Policies /> : tab === 'branches' ? <Branches /> : tab === 'doctors' ? <Doctors /> : tab === 'abdm' ? <Abdm /> : tab === 'subscription' ? <Subscription /> : tab === 'profile' ? <Profile /> : <p className="text-sm text-muted">You do not have access to any settings.</p>}
     </div>
   )
 }

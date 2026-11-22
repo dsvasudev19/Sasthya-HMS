@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, CalendarPlus, IdCard, Receipt } from 'lucide-react'
+import { ArrowLeft, CalendarPlus, IdCard, Receipt, Shield, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import AppointmentsTable from '../components/AppointmentsTable'
+import AbhaModal from '../components/AbhaModal'
 import InvoiceModal from '../components/InvoiceModal'
 import NewAppointmentModal from '../components/NewAppointmentModal'
 import Select from '../components/Select'
@@ -33,6 +34,7 @@ export default function PatientDetail() {
   const [tab, setTab] = useState<'visits' | 'bills' | 'record'>('visits')
   const [booking, setBooking] = useState(false)
   const [billing, setBilling] = useState(false)
+  const [abhaOpen, setAbhaOpen] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const qc = useQueryClient()
   const prefs = useMutation({ mutationFn: (b: { language?: string; reminderOptOut?: boolean }) => api(`/patients/${id}`, { method: 'PATCH', body: JSON.stringify(b) }), onSuccess: () => qc.invalidateQueries({ queryKey: ['patient', id] }) })
@@ -56,27 +58,71 @@ export default function PatientDetail() {
           {p.outstandingPaise > 0 && <p className="mt-1 text-sm font-semibold text-red-600">Outstanding {rupees(p.outstandingPaise)}</p>}
         </div>
         <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setAbhaOpen(true)} className={p.abhaNumber ? 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100' : ''}>
+            <Shield size={16} /> {p.abhaNumber ? 'ABHA Linked' : 'Link ABHA'}
+          </Button>
           <Button variant="ghost" onClick={() => void printPdf(`/patients/${p.id}/card.pdf`)}><IdCard size={16} /> Print ID card</Button>
           <Button variant="ghost" onClick={() => setBilling(true)}><Receipt size={16} /> New bill</Button>
           <Button onClick={() => setBooking(true)}><CalendarPlus size={16} /> Book appointment</Button>
         </div>
       </div>
 
-      <div className="rounded-2xl bg-surface p-5 ring-1 ring-line">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Health card</p>
-        {cov ? (
-          <div className="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
-            <span className="text-lg font-bold tracking-wide">{cov.cardNo}</span>
-            <span className="text-muted">{cov.planName}</span>
-            {cov.subscriptionId ? (
-              <>
-                <span>Valid till <b>{fmtDate(cov.endsAt)}</b></span>
-                <span><b className="text-brand-700">{cov.remaining.inPerson}</b>/{cov.limits.inPerson} in person left</span>
-                <span><b className="text-brand-700">{cov.remaining.tele}</b>/{cov.limits.tele} tele left</span>
-              </>
-            ) : <span className="font-semibold text-red-600">Plan expired</span>}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-2xl bg-surface p-5 ring-1 ring-line">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Health card</p>
+          {cov ? (
+            <div className="mt-2 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+              <span className="text-lg font-bold tracking-wide">{cov.cardNo}</span>
+              <span className="text-muted">{cov.planName}</span>
+              {cov.subscriptionId ? (
+                <>
+                  <span>Valid till <b>{fmtDate(cov.endsAt)}</b></span>
+                  <span><b className="text-brand-700">{cov.remaining.inPerson}</b>/{cov.limits.inPerson} in person left</span>
+                  <span><b className="text-brand-700">{cov.remaining.tele}</b>/{cov.limits.tele} tele left</span>
+                </>
+              ) : <span className="font-semibold text-red-600">Plan expired</span>}
+            </div>
+          ) : <p className="mt-2 text-sm text-muted">No health card. Issue one from the Health cards page.</p>}
+        </div>
+
+        <div className="rounded-2xl bg-surface p-5 ring-1 ring-line">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">ABDM / ABHA Profile</p>
+            {p.abhaNumber && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
+                <ShieldCheck size={12} /> Linked
+              </span>
+            )}
           </div>
-        ) : <p className="mt-2 text-sm text-muted">No health card. Issue one from the Health cards page.</p>}
+          {p.abhaNumber ? (
+            <div className="mt-2 space-y-1 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-base font-bold tracking-wider text-ink">
+                  {p.abhaNumber.replace(/(\d{2})(\d{4})(\d{4})(\d{4})/, '$1-$2-$3-$4')}
+                </span>
+                <button
+                  onClick={() => setAbhaOpen(true)}
+                  className="text-xs font-semibold text-brand-700 hover:underline"
+                >
+                  Manage
+                </button>
+              </div>
+              <p className="text-xs text-muted">
+                ABHA Address: <span className="font-semibold text-ink">{p.abhaAddress || '—'}</span>
+              </p>
+            </div>
+          ) : (
+            <div className="mt-2 flex items-center justify-between">
+              <p className="text-sm text-muted">No ABHA linked yet.</p>
+              <button
+                onClick={() => setAbhaOpen(true)}
+                className="text-xs font-semibold text-brand-700 hover:underline"
+              >
+                Link or create ABHA
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {p.phone && (
@@ -118,6 +164,7 @@ export default function PatientDetail() {
       {booking && <NewAppointmentModal initialPatient={p} onClose={() => setBooking(false)} />}
       {billing && <NewInvoiceModal initialPatient={p} onClose={() => setBilling(false)} onCreated={(i) => { setBilling(false); setOpen(i) }} />}
       {open && <InvoiceModal invoiceId={open} onClose={() => setOpen(null)} />}
+      {abhaOpen && <AbhaModal patient={p} onClose={() => setAbhaOpen(false)} />}
     </div>
   )
 }

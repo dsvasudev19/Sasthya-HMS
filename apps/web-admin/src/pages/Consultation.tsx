@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { AlertTriangle, ArrowLeft, BookOpen, Camera, FileDown, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BookOpen, Camera, FileDown, Plus, Shield, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth'
@@ -228,7 +228,30 @@ export default function Consultation() {
 
         <div className="space-y-5">
           <section id="receipt" className="rounded-2xl p-5 ring-1 ring-line">
-            <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-semibold">Prescription</h2>{(c?.completedAt || (isDoctor && items.length > 0)) && <button disabled={printRx.isPending} onClick={() => (c?.completedAt ? void openFile(`/consultations/${c.id}/prescription.pdf`) : printRx.mutate())} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 print:hidden"><FileDown size={14} /> {c?.completedAt ? `Print Rx ${c.rxNo ?? ''}` : 'Save and preview Rx'}</button>}</div>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Prescription</h2>
+              <div className="flex items-center gap-2">
+                {(c?.completedAt || (isDoctor && items.length > 0)) && (
+                  <button
+                    disabled={printRx.isPending}
+                    onClick={() => (c?.completedAt ? void openFile(`/consultations/${c.id}/prescription.pdf`) : printRx.mutate())}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:text-brand-800 print:hidden"
+                  >
+                    <FileDown size={14} /> {c?.completedAt ? `Print Rx ${c.rxNo ?? ''}` : 'Save and preview Rx'}
+                  </button>
+                )}
+                {c?.id && (
+                  <button
+                    type="button"
+                    onClick={() => void openFile(`/consultations/${c.id}/fhir`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800 ring-1 ring-sky-200 hover:bg-sky-100 print:hidden"
+                    title="Export NRCeS FHIR R4 Bundle"
+                  >
+                    <Shield size={13} /> Export FHIR R4
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="space-y-3">
               {items.map((it, i) => (
                 <div key={i} className="rounded-xl bg-surface p-3">
@@ -325,7 +348,20 @@ export default function Consultation() {
           <Button disabled={complete.isPending} onClick={async () => { await complete.mutateAsync(); nav('/') }}>Complete visit</Button>
         </div>
       )}
-      {c?.completedAt && <p className="text-sm text-brand-700 print:hidden">Visit completed on {fmtDate(c.completedAt)}. Notes are locked.{c.items.length > 0 && ' The prescription is waiting at the pharmacy counter.'}</p>}
+      {c?.completedAt && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-brand-50/70 p-4 ring-1 ring-brand-200 print:hidden">
+          <p className="text-sm text-brand-800">
+            Visit completed on {fmtDate(c.completedAt)}. Notes are locked.{c.items.length > 0 && ' The prescription is waiting at the pharmacy counter.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => void openFile(`/consultations/${c.id}/fhir`)}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 ring-1 ring-sky-300 shadow-xs hover:bg-sky-50"
+          >
+            <Shield size={14} className="text-sky-600" /> Download NRCeS FHIR R4 Bundle
+          </button>
+        </div>
+      )}
     </div>
   )
 }

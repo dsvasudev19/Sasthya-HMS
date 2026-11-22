@@ -80,6 +80,9 @@ export async function cleanupTenant(f: Fixture) {
   await admin.tenantSecurity.deleteMany({ where: { tenantId: f.tenantId } });
   await admin.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${f.tenantId}, true)`;
+    await tx.abdmConsentArtifact.deleteMany();
+    await tx.abdmCareContext.deleteMany();
+    await tx.abdmFacilityConfig.deleteMany();
     await tx.claimEvent.deleteMany();
     await tx.claim.deleteMany();
     await tx.patientPolicy.deleteMany();
