@@ -124,9 +124,9 @@ export default function Ipd() {
                   {can('ipd:manage') && <button className="text-xs font-semibold text-brand-700 hover:underline" onClick={() => setWard({ ward: w })}>Edit</button>}</div>
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
                   {w.beds.filter((b) => b.active).map((b) => (
-                    <button key={b.id} type="button" onClick={() => b.admission ? nav(`/ipd/${b.admission.id}`) : b.status === 'AVAILABLE' ? can('ipd:write') && setAdmit({ bed: b }) : b.status === 'CLEANING' && can('ipd:write') ? free.mutate(b.id) : undefined}
-                      title={b.status === 'CLEANING' ? 'Click when the bed is ready' : undefined} className={clsx('min-h-20 rounded-xl border p-3 text-left text-sm transition hover:shadow', TONE[b.status])}>
-                      <span className="flex justify-between font-bold">{b.code}{b.status === 'CLEANING' && <span className="text-[10px] font-semibold text-amber-700">tap when ready</span>}</span>
+                    <button key={b.id} type="button" onClick={() => b.admission ? nav(`/ipd/${b.admission.id}`) : b.status === 'AVAILABLE' ? can('ipd:write') && setAdmit({ bed: b }) : (b.status === 'CLEANING' || b.status === 'MAINTENANCE') && can('ipd:write') ? free.mutate(b.id) : undefined}
+                      title={b.status === 'CLEANING' || b.status === 'MAINTENANCE' ? 'Click to make bed available' : undefined} className={clsx('min-h-20 rounded-xl border p-3 text-left text-sm transition hover:shadow', TONE[b.status])}>
+                      <span className="flex justify-between font-bold">{b.code}{(b.status === 'CLEANING' || b.status === 'MAINTENANCE') && <span className="text-[10px] font-semibold text-amber-700">tap when ready</span>}</span>
                       {b.admission ? <><span className="block truncate font-medium">{b.admission.patientName}</span><span className="block text-[11px] text-muted">Day {days(b.admission.admittedAt)}{b.admission.expectedDischargeOn && new Date(b.admission.expectedDischargeOn) < new Date(Date.now() - 86_400_000) ? ' · past expected discharge' : ''}</span></> : <span className="text-xs text-muted">{b.status === 'AVAILABLE' ? 'Free' : b.status.toLowerCase()}</span>}
                     </button>
                   ))}

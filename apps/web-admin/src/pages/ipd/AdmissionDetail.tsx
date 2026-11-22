@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { ArrowLeft, FileText, HeartPulse, Printer, Repeat2, LogOut, Plus, X } from 'lucide-react'
+import { ArrowLeft, CheckCheck, FileText, HeartPulse, LogOut, Plus, Printer, Repeat2, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../../auth'
@@ -8,6 +8,7 @@ import PatientRecord from '../../components/PatientRecord'
 import Select from '../../components/Select'
 import { Button, Field, inputCls, Modal } from '../../components/ui'
 import { api, openFile } from '../../lib/api'
+import { DOCTOR_ROUND_TEMPLATES, INPATIENT_ORDER_PRESETS } from '../../lib/ipdTemplates'
 import { fmtDate, rupees } from '../../lib/format'
 
 interface Note { id: string; kind: 'NOTE' | 'VITALS' | 'ROUND' | 'ORDER'; text: string | null; vitals: Record<string, number> | null; createdAt: string; author: string | null }
@@ -122,6 +123,17 @@ export default function AdmissionDetail() {
   const { data: a } = useQuery({ queryKey: ['ipd', 'admission', id], queryFn: () => api<Adm>(`/ipd/admissions/${id}`) })
   const refresh = () => { qc.invalidateQueries({ queryKey: ['ipd'] }); setShowVitals(false) }
   const add = useMutation({ mutationFn: () => api(`/ipd/admissions/${id}/notes`, { method: 'POST', body: JSON.stringify({ kind, text: note }) }), onSuccess: () => { setNote(''); refresh() } })
+  const markAdministered = useMutation({
+    mutationFn: (orderText: string) =>
+      api(`/ipd/admissions/${id}/notes`, {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: 'NOTE',
+          text: `✓ ADMINISTERED: ${orderText} (Verified by nursing staff at ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })})`,
+        }),
+      }),
+    onSuccess: refresh,
+  })
   if (!a) return <p className="py-16 text-center text-sm text-muted">Loading…</p>
   const open = a.status === 'ADMITTED'
   const day = Math.max(1, Math.ceil(((a.dischargedAt ? new Date(a.dischargedAt) : new Date()).getTime() - new Date(a.admittedAt).getTime()) / 86_400_000))
@@ -145,23 +157,81 @@ export default function AdmissionDetail() {
             {open && can('ipd:write') && (
               <section className="space-y-3 rounded-2xl p-4 ring-1 ring-line">
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="w-36"><Select value={kind} onChange={setKind} options={[{ value: 'NOTE', label: 'Nursing note' }, { value: 'ROUND', label: "Doctor's round" }, { value: 'ORDER', label: 'Order' }]} /></div>
+                  <div className="w-36"><Select value={kind} onChange={setKind} options={[{ value: 'NOTE', label: 'Nursing note' }, { value: 'ROUND', label: "Doctor's round" }, { value: 'ORDER', label: 'Order / Rx' }]} /></div>
                   <Button variant="ghost" className="ml-auto" onClick={() => setShowVitals(!showVitals)}><HeartPulse size={15} /> Vitals</Button>
                 </div>
+
+                {!showVitals && kind === 'ROUND' && (
+                  <div className="space-y-1 rounded-xl bg-surface p-2.5 border border-line">
+                    <p className="flex items-center gap-1 text-[11px] font-semibold text-brand-800 uppercase tracking-wide">
+                      <Sparkles size={12} className="text-brand-600" /> Daily Round Presets:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {DOCTOR_ROUND_TEMPLATES.map((tmpl) => (
+                        <button
+                          key={tmpl.title}
+                          type="button"
+                          onClick={() => setNote(tmpl.text)}
+                          className="rounded-lg border border-line bg-white px-2.5 py-1 text-xs text-slate-700 hover:border-brand-500 hover:bg-brand-50 transition"
+                        >
+                          + {tmpl.title}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!showVitals && kind === 'ORDER' && (
+                  <div className="space-y-1 rounded-xl bg-surface p-2.5 border border-line">
+                    <p className="flex items-center gap-1 text-[11px] font-semibold text-brand-800 uppercase tracking-wide">
+                      <Sparkles size={12} className="text-brand-600" /> Common Inpatient Medication / Care Orders:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-0.5">
+                      {INPATIENT_ORDER_PRESETS.map((orderPreset) => (
+                        <button
+                          key={orderPreset}
+                          type="button"
+                          onClick={() => setNote((cur) => (cur ? `${cur}\n• ${orderPreset}` : `• ${orderPreset}`))}
+                          className="rounded-lg border border-line bg-white px-2 py-0.5 text-xs text-slate-700 hover:border-brand-500 hover:bg-brand-50 transition text-left"
+                        >
+                          + {orderPreset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {showVitals ? <VitalsForm id={id} onDone={refresh} /> : (
-                  <div className="flex gap-2"><textarea className={`${inputCls} flex-1`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What happened, what was done" /><Button className="self-end" disabled={!note.trim() || add.isPending} onClick={() => add.mutate()}>Save</Button></div>
+                  <div className="flex gap-2"><textarea className={`${inputCls} flex-1`} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={kind === 'ORDER' ? 'Enter inpatient medication, IV fluids, or nursing orders...' : kind === 'ROUND' ? "Doctor's examination, progress findings, plan..." : 'Nursing notes, care provided...'} /><Button className="self-end font-bold" disabled={!note.trim() || add.isPending} onClick={() => add.mutate()}>Save</Button></div>
                 )}
                 {add.error && <p className="text-sm text-red-600">{(add.error as Error).message}</p>}
               </section>
             )}
             <section>
-              <h2 className="mb-2 text-sm font-semibold">Chart</h2>
+              <h2 className="mb-2 text-sm font-semibold">Inpatient Care Chart</h2>
               {a.notes.length === 0 ? <p className="rounded-2xl bg-surface p-8 text-center text-sm text-muted">Nothing recorded yet.</p> : (
                 <ol className="space-y-2">{a.notes.map((n) => (
-                  <li key={n.id} className="rounded-xl p-3 text-sm ring-1 ring-line">
-                    <p className="flex justify-between text-xs text-muted"><span className="font-semibold uppercase">{n.kind === 'ROUND' ? "Doctor's round" : n.kind === 'ORDER' ? 'Order' : n.kind === 'VITALS' ? 'Vitals' : 'Note'}</span><span>{n.author} · {when(n.createdAt)}</span></p>
-                    {n.text && <p className="mt-1 whitespace-pre-wrap">{n.text}</p>}
+                  <li key={n.id} className={clsx('rounded-xl p-3.5 text-sm ring-1 transition', n.kind === 'ORDER' ? 'ring-brand-300 bg-brand-50/20' : 'ring-line bg-white')}>
+                    <p className="flex justify-between text-xs text-muted">
+                      <span className={clsx('font-bold uppercase tracking-wider text-[11px]', n.kind === 'ORDER' ? 'text-brand-700' : n.kind === 'ROUND' ? 'text-sky-700' : 'text-slate-600')}>
+                        {n.kind === 'ROUND' ? "Doctor's round" : n.kind === 'ORDER' ? 'Doctor Order / Medication' : n.kind === 'VITALS' ? 'Vitals' : 'Nursing Note'}
+                      </span>
+                      <span>{n.author} · {when(n.createdAt)}</span>
+                    </p>
+                    {n.text && <p className="mt-1.5 whitespace-pre-wrap text-slate-800">{n.text}</p>}
                     {n.vitals && <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 font-medium">{VITALS.filter(([k]) => n.vitals![k] !== undefined).map(([k, l]) => <span key={k}><span className="text-xs font-normal text-muted">{l} </span>{n.vitals![k]}</span>)}</p>}
+                    {n.kind === 'ORDER' && open && can('ipd:write') && (
+                      <div className="pt-2 border-t border-slate-100 mt-2">
+                        <button
+                          type="button"
+                          disabled={markAdministered.isPending}
+                          onClick={() => markAdministered.mutate(n.text || 'Medication/Order')}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 border border-emerald-300 px-2.5 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 transition"
+                        >
+                          <CheckCheck size={13} className="text-emerald-700" /> Mark Administered (eMAR)
+                        </button>
+                      </div>
+                    )}
                   </li>))}</ol>)}
             </section>
           </div>
