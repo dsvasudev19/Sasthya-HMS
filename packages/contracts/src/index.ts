@@ -290,6 +290,11 @@ export const teamAddInput = z.object({
   roles: z.array(roleKey).min(1).max(4),
   branchIds: z.array(z.string().uuid()).max(100).optional(),
 }).refine((d) => !!d.email || !!d.phone, { message: "Email or phone is required" });
+export const teamUpdateInput = z.object({
+  fullName: z.string().trim().min(2).max(100).optional(),
+  email: z.string().trim().email("Enter a valid email address").toLowerCase().optional().nullable(),
+  phone: z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile number").optional().nullable(),
+});
 export const teamRolesInput = z.object({ roles: z.array(roleKey).min(1).max(4) });
 export const subscriptionPlanInput = z.object({ planCode: planCodeSchema });
 export const platformTenantPatch = z.object({

@@ -2,10 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { can, hashPassword, temporaryPassword, type Role } from "@hms/auth";
 import { effectivePlan, seatLimit } from "@hms/billing-core";
-import { staffBranchesInput, teamAddInput, teamRolesInput } from "@hms/contracts";
+import { staffBranchesInput, teamAddInput, teamRolesInput, teamUpdateInput } from "@hms/contracts";
 import { withTenant, type PrismaClient } from "@hms/db";
 import { clearAuthzCache } from "../authz";
-import { staff, staffGuard } from "../guards";
+import { staff, staffGuard, todayIst } from "../guards";
 import { tenantInfo } from "../gates";
 import { revokeAllFor } from "../session";
 import { logAccess } from "./access";
@@ -154,5 +154,72 @@ export default async function teamRoutes(app: FastifyInstance, { db }: { db: Pri
     await db.identity.update({ where: { id }, data: { passwordHash: await hashPassword(temp), mustChangePassword: true } });
     await revokeAllFor(db, id);
     return { temporaryPassword: temp };
+  });
+
+  app.patch("/team/:id", { preHandler: staffGuard("team:manage") }, async (req) => {
+    const { id } = idParam.parse(req.params);
+    const input = teamUpdateInput.parse(req.body);
+    const tenantId = staff(req).tid;
+    const isMember = (await db.tenantMembership.count({ where: { tenantId, identityId: id } })) > 0;
+    if (!isMember) throw httpError(404, "Staff member not found");
+
+    if (input.email) {
+      const conflict = await db.identity.findFirst({ where: { email: input.email, id: { not: id } } });
+      if (conflict) throw httpError(409, "Email is already in use by another account");
+    }
+    if (input.phone) {
+      const conflict = await db.identity.findFirst({ where: { phone: input.phone, id: { not: id } } });
+      if (conflict) throw httpError(409, "Phone number is already in use by another account");
+    }
+
+    const updated = await db.identity.update({
+      where: { id },
+      data: {
+        ...(input.fullName ? { fullName: input.fullName } : {}),
+        ...(input.email !== undefined ? { email: input.email } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone } : {}),
+      },
+    });
+
+    clearAuthzCache(tenantId);
+    await logAccess(db, tenantId, staff(req).sub, "access.team.update", id, {
+      fullName: updated.fullName,
+      email: updated.email,
+      phone: updated.phone,
+    });
+
+    return { id: updated.id, fullName: updated.fullName, email: updated.email, phone: updated.phone };
+  });
+
+  app.get("/team/stats", { preHandler: staffGuard("team:manage") }, async (req) => {
+    const tenantId = staff(req).tid;
+    const t = await tenantInfo(db, tenantId);
+    const members = await list(tenantId);
+    const today = new Date(`${todayIst()}T00:00:00Z`);
+
+    const [punchedInCount, shiftsTodayCount, onLeaveCount] = await withTenant(db, tenantId, async (tx) => {
+      const [punched, shifts, leaves] = await Promise.all([
+        tx.attendance.count({ where: { date: today, checkOutAt: null } }),
+        tx.shift.count({ where: { date: today } }),
+        tx.leaveRequest.count({ where: { status: "APPROVED", fromDate: { lte: today }, toDate: { gte: today } } }),
+      ]);
+      return [punched, shifts, leaves];
+    });
+
+    const rolesMap: Record<string, number> = {};
+    for (const m of members) {
+      for (const r of m.roles) {
+        rolesMap[r] = (rolesMap[r] ?? 0) + 1;
+      }
+    }
+
+    return {
+      totalStaff: members.length,
+      seatsLimit: seatLimit(effectivePlan(t), t.maxSeats),
+      onDutyNow: punchedInCount,
+      shiftsToday: shiftsTodayCount,
+      onLeaveToday: onLeaveCount,
+      byRole: rolesMap,
+    };
   });
 }

@@ -92,4 +92,23 @@ describe("audit trail", () => {
     assert.equal((await call(rec, "GET", "/audit")).status, 403);
     assert.equal((await call(adminTok, "GET", "/audit")).status, 200, "admins can read it by default");
   });
+
+  it("allows updating staff profile details and returns workforce statistics", async () => {
+    // 1. Update staff profile details
+    const patchRes = await call(owner, "PATCH", `/team/${recId}`, {
+      fullName: "Updated Receptionist Name",
+      email: "updated.rec@hospital.com",
+    });
+    assert.equal(patchRes.status, 200);
+    assert.equal(patchRes.body.fullName, "Updated Receptionist Name");
+    assert.equal(patchRes.body.email, "updated.rec@hospital.com");
+
+    // 2. Fetch workforce stats
+    const statsRes = await call(owner, "GET", "/team/stats");
+    assert.equal(statsRes.status, 200);
+    assert.ok(typeof statsRes.body.totalStaff === "number");
+    assert.ok(statsRes.body.totalStaff >= 2);
+    assert.ok(typeof statsRes.body.onDutyNow === "number");
+    assert.ok(statsRes.body.byRole.RECEPTIONIST >= 1);
+  });
 });

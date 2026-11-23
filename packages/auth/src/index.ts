@@ -123,6 +123,8 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: "payouts:read", group: "Staff", label: "View doctor revenue-share statements" },
   { key: "payouts:manage", group: "Staff", label: "Set doctor shares and approve payouts" },
   { key: "feedback:read", group: "Administration", label: "View patient feedback" },
+  { key: "abdm:read", group: "Compliance", label: "View ABHA details and ABDM records" },
+  { key: "abdm:write", group: "Compliance", label: "Create ABHA, link care contexts, and export FHIR bundles" },
   { key: "exports:read", group: "Administration", label: "Download exports and manage scheduled reports" },
   { key: "security:manage", group: "Administration", label: "Sign-in security for the organization" },
   { key: "executive:read", group: "Administration", label: "View the executive dashboard" },
