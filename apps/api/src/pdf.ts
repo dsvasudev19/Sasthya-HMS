@@ -435,3 +435,173 @@ export function dischargeSummaryPdf(d: {
     pdf.end();
   });
 }
+
+/** Official Diagnostic Test / Pathology Report PDF with reference intervals and flags. */
+export function labReportPdf(d: {
+  hospital: { name: string; branchName?: string; address?: string | null; phone?: string | null; gstin?: string | null };
+  order: { orderNo: string; sampleBarcode?: string | null; createdAt: Date; collectedAt?: Date | null; releasedAt?: Date | null; doctor?: string | null; clinicalNotes?: string | null };
+  patient: { name: string; patientNo: string; gender?: string | null; dob?: Date | null; phone?: string | null };
+  items: { testName: string; department?: string | null; unit?: string | null; refRange?: string | null; resultText?: string | null; resultValue?: number | string | null; flag?: string | null; notes?: string | null; method?: string | null }[];
+  releasedBy?: { name?: string | null };
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const pdf = new PDFDocument({ size: "A4", margin: 44, info: { Title: `Lab Report ${d.order.orderNo}`, Producer: "Swasthya HMS" } });
+    const chunks: Buffer[] = [];
+    pdf.on("data", (c: Buffer) => chunks.push(c));
+    pdf.on("end", () => resolve(Buffer.concat(chunks)));
+    pdf.on("error", reject);
+
+    const brand = "#0369a1"; // Diagnostic Blue
+    // Hospital Header
+    pdf.fillColor(brand).font("Helvetica-Bold").fontSize(18).text(d.hospital.name, 44, 44);
+    pdf.fillColor("#444").font("Helvetica").fontSize(8.5);
+    if (d.hospital.branchName) pdf.text(d.hospital.branchName);
+    if (d.hospital.address) pdf.text(d.hospital.address);
+    pdf.text([d.hospital.phone && `Tel: ${d.hospital.phone}`, d.hospital.gstin && `GSTIN: ${d.hospital.gstin}`].filter(Boolean).join("  ·  "));
+
+    pdf.fillColor(brand).font("Helvetica-Bold").fontSize(15).text("DIAGNOSTIC TEST REPORT", 330, 44, { width: 220, align: "right" });
+    pdf.fillColor("#444").font("Helvetica").fontSize(9).text(`Order No: ${d.order.orderNo}`, 330, 66, { width: 220, align: "right" });
+    if (d.order.sampleBarcode) pdf.text(`Barcode: ${d.order.sampleBarcode}`, 330, 79, { width: 220, align: "right" });
+    pdf.text(`Reported: ${date(d.order.releasedAt ?? new Date())}`, 330, 92, { width: 220, align: "right" });
+
+    pdf.moveTo(44, 114).lineTo(551, 114).strokeColor("#cbd5e1").stroke();
+
+    // Patient Details Box
+    const age = d.patient.dob ? `${Math.floor((Date.now() - new Date(d.patient.dob).getTime()) / (365.25 * 86_400_000))} Y` : "-";
+    const patientDetails: [string, string][] = [
+      ["Patient Name", d.patient.name],
+      ["UHID / Reg No", d.patient.patientNo],
+      ["Age / Gender", `${age} / ${(d.patient.gender ?? "-").toUpperCase()}`],
+      ["Referring Doctor", d.order.doctor ? `Dr. ${d.order.doctor.replace(/^Dr\.? /i, "")}` : "Self / Walk-in"],
+      ["Sample Collected", d.order.collectedAt ? date(d.order.collectedAt) : "-"],
+      ["Sample Status", "Verified & Released"],
+    ];
+
+    let py = 122;
+    patientDetails.forEach(([lbl, val], idx) => {
+      const col = idx % 2 === 0 ? 44 : 310;
+      pdf.fillColor("#64748b").font("Helvetica").fontSize(7.5).text(lbl.toUpperCase(), col, py);
+      pdf.fillColor("#0f172a").font("Helvetica-Bold").fontSize(9.5).text(val, col, py + 9, { width: 240 });
+      if (idx % 2 === 1) py += 25;
+    });
+
+    py += 10;
+    pdf.moveTo(44, py).lineTo(551, py).strokeColor("#cbd5e1").stroke();
+
+    // Table Header
+    py += 8;
+    pdf.rect(44, py, 507, 20).fill("#f1f5f9");
+    pdf.fillColor("#1e293b").font("Helvetica-Bold").fontSize(8.5);
+    pdf.text("INVESTIGATION / TEST", 50, py + 5, { width: 190 });
+    pdf.text("OBSERVED VALUE", 245, py + 5, { width: 100 });
+    pdf.text("UNITS", 350, py + 5, { width: 60 });
+    pdf.text("REFERENCE INTERVAL", 415, py + 5, { width: 130 });
+
+    py += 24;
+
+    // Results rows
+    d.items.forEach((item) => {
+      const isCritical = item.flag === "CRITICAL_LOW" || item.flag === "CRITICAL_HIGH";
+      const isAbnormal = isCritical || item.flag === "LOW" || item.flag === "HIGH";
+
+      pdf.fillColor("#0f172a").font(isAbnormal ? "Helvetica-Bold" : "Helvetica").fontSize(9);
+      pdf.text(item.testName, 50, py, { width: 190 });
+      if (item.method) {
+        pdf.fillColor("#64748b").font("Helvetica-Oblique").fontSize(7).text(`Method: ${item.method}`, 50, py + 10, { width: 190 });
+      }
+
+      // Value with flag
+      const valStr = String(item.resultValue ?? item.resultText ?? "-");
+      const flagStr = isCritical ? ` (${item.flag?.replace("_", " ")})` : isAbnormal ? ` (${item.flag})` : "";
+      pdf.fillColor(isCritical ? "#dc2626" : isAbnormal ? "#ea580c" : "#0f172a").font("Helvetica-Bold").fontSize(9.5);
+      pdf.text(`${valStr}${flagStr}`, 245, py, { width: 100 });
+
+      // Units
+      pdf.fillColor("#475569").font("Helvetica").fontSize(8.5).text(item.unit ?? "-", 350, py, { width: 60 });
+
+      // Reference interval
+      pdf.fillColor("#475569").font("Helvetica").fontSize(8.5).text(item.refRange ?? "-", 415, py, { width: 130 });
+
+      py += item.method ? 24 : 18;
+      pdf.moveTo(44, py - 2).lineTo(551, py - 2).strokeColor("#f1f5f9").stroke();
+    });
+
+    if (d.order.clinicalNotes) {
+      py += 6;
+      pdf.fillColor("#64748b").font("Helvetica-Bold").fontSize(8).text("CLINICAL NOTES / INTERPRETATION:", 50, py);
+      pdf.fillColor("#334155").font("Helvetica").fontSize(8.5).text(d.order.clinicalNotes, 50, py + 10, { width: 490 });
+      py += 26;
+    }
+
+    // Signatures at bottom
+    const sigY = Math.max(py + 40, 710);
+    pdf.moveTo(44, sigY).lineTo(180, sigY).strokeColor("#94a3b8").stroke();
+    pdf.fillColor("#475569").font("Helvetica").fontSize(8).text("Medical Lab Technologist", 44, sigY + 4);
+
+    pdf.moveTo(380, sigY).lineTo(551, sigY).strokeColor("#94a3b8").stroke();
+    pdf.fillColor("#0f172a").font("Helvetica-Bold").fontSize(8.5).text(d.releasedBy?.name ?? "Consultant Pathologist", 380, sigY + 4, { width: 171, align: "right" });
+    pdf.fillColor("#64748b").font("Helvetica").fontSize(7.5).text("MBBS, MD (Pathology / Lab Medicine)", 380, sigY + 16, { width: 171, align: "right" });
+
+    // Footer
+    pdf.moveTo(44, 785).lineTo(551, 785).strokeColor("#e2e8f0").stroke();
+    pdf.fillColor("#94a3b8").fontSize(7.5).text("This diagnostic laboratory report is digitally authorized. Partial reproduction of this report is not permitted.", 44, 792, { width: 507, align: "center" });
+
+    pdf.end();
+  });
+}
+
+/** Official Patient Advance Deposit / Wallet Receipt PDF */
+export function advanceReceiptPdf(d: {
+  hospital: { name: string; address?: string | null; phone?: string | null; gstin?: string | null };
+  receiptNo: string;
+  createdAt: Date;
+  patient: { name: string; patientNo: string; phone?: string | null };
+  amountPaise: number;
+  balancePaise: number;
+  method: string;
+  reference?: string | null;
+  notes?: string | null;
+  receivedBy?: string | null;
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const pdf = new PDFDocument({ size: "A5", margin: 30, info: { Title: `Advance Receipt ${d.receiptNo}`, Producer: "Swasthya HMS" } });
+    const chunks: Buffer[] = [];
+    pdf.on("data", (c: Buffer) => chunks.push(c));
+    pdf.on("end", () => resolve(Buffer.concat(chunks)));
+    pdf.on("error", reject);
+
+    const green = "#15803d";
+    pdf.fillColor(green).font("Helvetica-Bold").fontSize(15).text(d.hospital.name, 30, 30);
+    pdf.fillColor("#555").font("Helvetica").fontSize(8);
+    if (d.hospital.address) pdf.text(d.hospital.address);
+    if (d.hospital.phone) pdf.text(`Phone: ${d.hospital.phone}`);
+
+    pdf.fillColor(green).font("Helvetica-Bold").fontSize(13).text("ADVANCE RECEIPT", 260, 30, { width: 130, align: "right" });
+    pdf.fillColor("#555").font("Helvetica").fontSize(8).text(`No: ${d.receiptNo}`, 260, 48, { width: 130, align: "right" });
+    pdf.text(`Date: ${date(d.createdAt)}`, 260, 60, { width: 130, align: "right" });
+
+    pdf.moveTo(30, 80).lineTo(390, 80).strokeColor("#cbd5e1").stroke();
+
+    pdf.fillColor("#334155").font("Helvetica-Bold").fontSize(9).text("Patient Information:", 30, 90);
+    pdf.font("Helvetica").fontSize(8.5).text(`Name: ${d.patient.name}   |   Patient UHID: ${d.patient.patientNo}${d.patient.phone ? `   |   Mobile: ${d.patient.phone}` : ""}`, 30, 104);
+
+    pdf.rect(30, 125, 360, 50).fill("#f8fafc").strokeColor("#e2e8f0").stroke();
+    pdf.fillColor("#475569").font("Helvetica").fontSize(8).text("DEPOSIT AMOUNT RECEIVED", 40, 133);
+    pdf.fillColor(green).font("Helvetica-Bold").fontSize(16).text(rupees(d.amountPaise), 40, 146);
+
+    pdf.fillColor("#475569").font("Helvetica").fontSize(8).text("AVAILABLE ADVANCE BALANCE", 220, 133);
+    pdf.fillColor("#0f172a").font("Helvetica-Bold").fontSize(16).text(rupees(d.balancePaise), 220, 146);
+
+    let y = 190;
+    pdf.fillColor("#334155").font("Helvetica-Bold").fontSize(8.5).text("Payment Details:", 30, y);
+    pdf.font("Helvetica").fontSize(8).text(`Payment Mode: ${d.method}${d.reference ? `   (Ref: ${d.reference})` : ""}`, 30, y + 14);
+    if (d.notes) pdf.text(`Notes / Purpose: ${d.notes}`, 30, y + 26);
+
+    y += 50;
+    pdf.moveTo(270, y + 30).lineTo(380, y + 30).strokeColor("#94a3b8").stroke();
+    pdf.fillColor("#64748b").fontSize(7.5).text("Authorized Cashier", 270, y + 34, { width: 110, align: "center" });
+
+    pdf.fillColor("#94a3b8").fontSize(7).text("This receipt acknowledges deposit towards hospital expenses. Please retain for billing settlement.", 30, 385, { width: 360, align: "center" });
+    pdf.end();
+  });
+}

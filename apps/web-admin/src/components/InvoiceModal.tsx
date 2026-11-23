@@ -1,24 +1,41 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileDown, Link2, Printer } from 'lucide-react'
+import { FileDown, Link2, Printer, Wallet } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useState } from 'react'
 import { useAuth } from '../auth'
 import { api, openFile } from '../lib/api'
 import { rupees } from '../lib/format'
-import type { InvoiceDetail } from '../lib/types'
+import type { InvoiceDetail, PatientAdvance } from '../lib/types'
 import Select from './Select'
 import { Button, inputCls, Modal } from './ui'
 
 const STATUS_CLS = { PAID: 'bg-brand-100 text-brand-700', PARTIAL: 'bg-amber-100 text-amber-700', UNPAID: 'bg-red-100 text-red-600', REFUNDED: 'bg-stone-200 text-stone-600', VOID: 'bg-stone-200 text-stone-600' } as const
-const METHODS = [{ value: 'CASH', label: 'Cash' }, { value: 'UPI', label: 'UPI' }, { value: 'CARD', label: 'Card' }] as const
+const METHODS = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'UPI', label: 'UPI' },
+  { value: 'CARD', label: 'Card' },
+  { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+  { value: 'CHEQUE', label: 'Cheque' },
+  { value: 'ADVANCE', label: 'Adjust Advance' },
+] as const
+
+type PayMethod = (typeof METHODS)[number]['value']
+
 const upiUri = (vpa: string, name: string, paise: number, note: string) => `upi://pay?${new URLSearchParams({ pa: vpa, pn: name, am: (paise / 100).toFixed(2), cu: 'INR', tn: note })}`
 
 export default function InvoiceModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
   const qc = useQueryClient()
   const { can } = useAuth()
   const { data: inv } = useQuery({ queryKey: ['invoice', invoiceId], queryFn: () => api<InvoiceDetail>(`/invoices/${invoiceId}`) })
+  const { data: advData } = useQuery({
+    queryKey: ['patient-advances', inv?.patient?.id],
+    queryFn: () => api<{ advances: PatientAdvance[]; totalPaise: number; balancePaise: number }>(`/patients/${inv!.patient!.id}/advances`),
+    enabled: !!inv?.patient?.id,
+  })
+  const advanceBalance = advData?.balancePaise ?? 0
+
   const [amount, setAmount] = useState('')
-  const [method, setMethod] = useState<'CASH' | 'UPI' | 'CARD'>('CASH')
+  const [method, setMethod] = useState<PayMethod>('CASH')
   const [reference, setReference] = useState('')
   const [refunding, setRefunding] = useState(false)
   const [refundAmount, setRefundAmount] = useState('')
@@ -28,7 +45,8 @@ export default function InvoiceModal({ invoiceId, onClose }: { invoiceId: string
   const refresh = (d: InvoiceDetail) => {
     qc.setQueryData(['invoice', invoiceId], { ...inv, ...d })
     qc.invalidateQueries({ queryKey: ['invoice', invoiceId] })
-    for (const k of ['invoices', 'today', 'appointments', 'collections']) qc.invalidateQueries({ queryKey: [k] })
+    for (const k of ['invoices', 'today', 'appointments', 'collections', 'advances']) qc.invalidateQueries({ queryKey: [k] })
+    if (inv?.patient?.id) qc.invalidateQueries({ queryKey: ['patient-advances', inv.patient.id] })
     setAmount(''); setReference(''); setRefunding(false); setRefundAmount(''); setRefundReason('')
   }
   const pay = useMutation({
@@ -99,11 +117,44 @@ export default function InvoiceModal({ invoiceId, onClose }: { invoiceId: string
 
       {open && (
         <div className="mt-5 space-y-3 print:hidden">
+          {advanceBalance > 0 && (
+            <div className="flex items-center justify-between rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-amber-200">
+              <div className="flex items-center gap-2">
+                <Wallet className="shrink-0 text-amber-600" size={18} />
+                <div>
+                  <p className="font-semibold">Patient advance available: {rupees(advanceBalance)}</p>
+                  <p className="text-amber-700">Adjust from deposited advance balance</p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                className="!bg-amber-100 !py-1 text-xs font-semibold !text-amber-900 hover:!bg-amber-200"
+                disabled={pay.isPending}
+                onClick={() => {
+                  setMethod('ADVANCE')
+                  const canPay = Math.min(balance, advanceBalance)
+                  setAmount(String(canPay / 100))
+                  setReference('Adjusted from patient advance')
+                  pay.mutate(canPay)
+                }}
+              >
+                Pay {rupees(Math.min(balance, advanceBalance))} from advance
+              </Button>
+            </div>
+          )}
           <div className="flex gap-2">
             <input className={inputCls} inputMode="decimal" placeholder={`Amount (₹, up to ${balance / 100})`} value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} />
-            <div className="w-32 shrink-0"><Select value={method} onChange={setMethod} options={[...METHODS]} /></div>
+            <div className="w-40 shrink-0"><Select value={method} onChange={setMethod} options={[...METHODS]} /></div>
           </div>
-          {method !== 'CASH' && <input className={inputCls} placeholder="Reference (UPI id / last 4 digits)" value={reference} onChange={(e) => setReference(e.target.value)} />}
+          {method !== 'CASH' && (
+            <input
+              className={inputCls}
+              placeholder={method === 'ADVANCE' ? 'Adjustment reference / notes (optional)' : method === 'CHEQUE' ? 'Cheque number & bank' : method === 'BANK_TRANSFER' ? 'NEFT / RTGS reference' : 'Reference (UPI id / last 4 digits)'}
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+          )}
           <div className="flex gap-2">
             <Button className="flex-1" disabled={pay.isPending || !(entered > 0 && entered <= balance)} onClick={() => pay.mutate(entered)}>Record {amount ? rupees(entered) : 'payment'}</Button>
             <Button variant="ghost" disabled={pay.isPending} onClick={() => pay.mutate(balance)}>Full {rupees(balance)}</Button>

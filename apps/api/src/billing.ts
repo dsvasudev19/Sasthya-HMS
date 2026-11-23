@@ -2,7 +2,7 @@ import { taxInside } from "@hms/billing-core";
 import { nextSeq, type TenantTx } from "@hms/db";
 
 export type LineInput = { kind: "CONSULTATION" | "CARD_ISSUE" | "CARD_PLAN" | "SERVICE" | "MEDICINE" | "LAB" | "OTHER"; description: string; quantity: number; unitPaise: number; gstPercent?: number };
-type Method = "CASH" | "UPI" | "CARD" | "INSURANCE";
+type Method = "CASH" | "UPI" | "CARD" | "INSURANCE" | "CHEQUE" | "BANK_TRANSFER";
 
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
 
@@ -155,4 +155,79 @@ export async function refundInvoice(tx: TenantTx, o: { tenantId: string; invoice
     throw httpError(409, `You can refund at most ${inv.paidPaise - inv.refundedPaise} paise on this invoice`);
   }
   await tx.refund.create({ data: { tenantId: o.tenantId, invoiceId: o.invoiceId, amountPaise: o.amountPaise, method: o.method, reason: o.reason, createdBy: o.by } });
+}
+
+/** Record a patient advance payment / deposit (e.g. for IPD or planned treatment). */
+export async function createPatientAdvance(
+  tx: TenantTx,
+  adv: {
+    tenantId: string;
+    patientId: string;
+    amountPaise: number;
+    method: Method;
+    reference?: string;
+    notes?: string;
+    receivedBy?: string;
+  }
+) {
+  const year = new Date().getFullYear();
+  const seq = await nextSeq(tx, adv.tenantId, `advance:${year}`);
+  const receiptNo = `ADV-${year}-${String(seq).padStart(5, "0")}`;
+
+  return tx.patientAdvance.create({
+    data: {
+      tenantId: adv.tenantId,
+      receiptNo,
+      patientId: adv.patientId,
+      amountPaise: adv.amountPaise,
+      balancePaise: adv.amountPaise,
+      method: adv.method,
+      reference: adv.reference,
+      notes: adv.notes,
+      receivedBy: adv.receivedBy,
+    },
+    include: {
+      patient: { select: { id: true, fullName: true, patientNo: true, phone: true } },
+    },
+  });
+}
+
+/** Adjust unallocated patient advance balance against an invoice. */
+export async function adjustPatientAdvance(
+  tx: TenantTx,
+  tenantId: string,
+  invoiceId: string,
+  patientId: string,
+  amountPaise: number,
+  receivedBy?: string
+) {
+  const advances = await tx.patientAdvance.findMany({
+    where: { tenantId, patientId, balancePaise: { gt: 0 } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const totalAvail = advances.reduce((s, a) => s + a.balancePaise, 0);
+  if (totalAvail < amountPaise) {
+    throw httpError(400, `Insufficient advance balance (available: ${totalAvail} paise, required: ${amountPaise} paise)`);
+  }
+
+  let remaining = amountPaise;
+  const refs: string[] = [];
+  for (const a of advances) {
+    if (remaining <= 0) break;
+    const deduct = Math.min(a.balancePaise, remaining);
+    await tx.patientAdvance.update({
+      where: { id: a.id },
+      data: { balancePaise: a.balancePaise - deduct },
+    });
+    remaining -= deduct;
+    refs.push(a.receiptNo);
+  }
+
+  await recordPayment(tx, tenantId, invoiceId, {
+    amountPaise,
+    method: "CASH",
+    reference: `Adjusted from Advance: ${refs.join(", ")}`,
+    receivedBy,
+  });
 }

@@ -131,6 +131,7 @@ model Tenant {
   abdmConfig             AbdmFacilityConfig?
   careContexts           AbdmCareContext[]
   consentArtifacts       AbdmConsentArtifact[]
+  patientAdvances        PatientAdvance[]
   agreements             TenantAgreement[]
   tenantLimits           TenantLimits[]
 
@@ -234,6 +235,7 @@ model Patient {
   messages       Message[]
   careContexts   AbdmCareContext[]
   consents       AbdmConsentArtifact[]
+  advances       PatientAdvance[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, patientNo])
@@ -365,6 +367,8 @@ enum PaymentMethod {
   UPI
   CARD
   INSURANCE
+  CHEQUE
+  BANK_TRANSFER
 
   @@schema("hms")
 }
@@ -909,21 +913,24 @@ enum LabOrderStatus {
 }
 
 model LabTest {
-  id         String     @id @default(uuid(7)) @db.Uuid
-  tenantId   String     @map("tenant_id") @db.Uuid
-  code       String
-  name       String
-  sampleType SampleType @default(BLOOD) @map("sample_type")
-  pricePaise Int        @map("price_paise")
-  unit       String?
+  id              String     @id @default(uuid(7)) @db.Uuid
+  tenantId        String     @map("tenant_id") @db.Uuid
+  code            String
+  name            String
+  department      String?
+  sampleType      SampleType @default(BLOOD) @map("sample_type")
+  method          String?
+  pricePaise      Int        @map("price_paise")
+  unit            String?
   // Numeric reference range; leave empty for text results (e.g. "Positive").
-  refLow     Decimal?   @map("ref_low") @db.Decimal(12, 3)
-  refHigh    Decimal?   @map("ref_high") @db.Decimal(12, 3)
-  critLow    Decimal?   @map("crit_low") @db.Decimal(12, 3)
-  critHigh   Decimal?   @map("crit_high") @db.Decimal(12, 3)
-  active     Boolean    @default(true)
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  refLow          Decimal?   @map("ref_low") @db.Decimal(12, 3)
+  refHigh         Decimal?   @map("ref_high") @db.Decimal(12, 3)
+  critLow         Decimal?   @map("crit_low") @db.Decimal(12, 3)
+  critHigh        Decimal?   @map("crit_high") @db.Decimal(12, 3)
+  turnaroundHours Int?       @default(4) @map("turnaround_hours")
+  active          Boolean    @default(true)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   tenant Tenant         @relation(fields: [tenantId], references: [id])
   items  LabOrderItem[]
@@ -935,19 +942,22 @@ model LabTest {
 }
 
 model LabOrder {
-  id             String         @id @default(uuid(7)) @db.Uuid
-  tenantId       String         @map("tenant_id") @db.Uuid
-  branchId       String         @map("branch_id") @db.Uuid
-  orderNo        String         @map("order_no")
-  patientId      String         @map("patient_id") @db.Uuid
-  consultationId String?        @map("consultation_id") @db.Uuid
-  invoiceId      String?        @map("invoice_id") @db.Uuid
-  orderedBy      String?        @map("ordered_by") @db.Uuid
-  status         LabOrderStatus @default(ORDERED)
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  collectedAt    DateTime?      @map("collected_at") @db.Timestamptz(3)
-  releasedAt     DateTime?      @map("released_at") @db.Timestamptz(3)
-  releasedBy     String?        @map("released_by") @db.Uuid
+  id              String         @id @default(uuid(7)) @db.Uuid
+  tenantId        String         @map("tenant_id") @db.Uuid
+  branchId        String         @map("branch_id") @db.Uuid
+  orderNo         String         @map("order_no")
+  patientId       String         @map("patient_id") @db.Uuid
+  consultationId  String?        @map("consultation_id") @db.Uuid
+  invoiceId       String?        @map("invoice_id") @db.Uuid
+  orderedBy       String?        @map("ordered_by") @db.Uuid
+  sampleBarcode   String?        @map("sample_barcode")
+  clinicalNotes   String?        @map("clinical_notes")
+  rejectionReason String?        @map("rejection_reason")
+  status          LabOrderStatus @default(ORDERED)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  collectedAt     DateTime?      @map("collected_at") @db.Timestamptz(3)
+  releasedAt      DateTime?      @map("released_at") @db.Timestamptz(3)
+  releasedBy      String?        @map("released_by") @db.Uuid
 
   tenant       Tenant         @relation(fields: [tenantId], references: [id])
   branch       Branch         @relation(fields: [tenantId, branchId], references: [tenantId, id])
@@ -966,20 +976,22 @@ model LabOrder {
 }
 
 model LabOrderItem {
-  id          String      @id @default(uuid(7)) @db.Uuid
-  tenantId    String      @map("tenant_id") @db.Uuid
-  orderId     String      @map("order_id") @db.Uuid
-  testId      String      @map("test_id") @db.Uuid
-  testName    String      @map("test_name")
-  unit        String?
-  refRange    String?     @map("ref_range")
-  pricePaise  Int         @map("price_paise")
-  resultText  String?     @map("result_text")
-  resultValue Decimal?    @map("result_value") @db.Decimal(12, 3)
-  flag        ResultFlag?
-  notes       String?
-  resultedBy  String?     @map("resulted_by") @db.Uuid
-  resultedAt  DateTime?   @map("resulted_at") @db.Timestamptz(3)
+  id            String      @id @default(uuid(7)) @db.Uuid
+  tenantId      String      @map("tenant_id") @db.Uuid
+  orderId       String      @map("order_id") @db.Uuid
+  testId        String      @map("test_id") @db.Uuid
+  testName      String      @map("test_name")
+  sampleBarcode String?     @map("sample_barcode")
+  method        String?
+  unit          String?
+  refRange      String?     @map("ref_range")
+  pricePaise    Int         @map("price_paise")
+  resultText    String?     @map("result_text")
+  resultValue   Decimal?    @map("result_value") @db.Decimal(12, 3)
+  flag          ResultFlag?
+  notes         String?
+  resultedBy    String?     @map("resulted_by") @db.Uuid
+  resultedAt    DateTime?   @map("resulted_at") @db.Timestamptz(3)
 
   tenant Tenant   @relation(fields: [tenantId], references: [id])
   order  LabOrder @relation(fields: [tenantId, orderId], references: [tenantId, id])
@@ -987,6 +999,30 @@ model LabOrderItem {
 
   @@index([tenantId, orderId])
   @@map("lab_order_items")
+  @@schema("hms")
+}
+
+model PatientAdvance {
+  id           String        @id @default(uuid(7)) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  receiptNo    String        @map("receipt_no")
+  patientId    String        @map("patient_id") @db.Uuid
+  amountPaise  Int           @map("amount_paise")
+  balancePaise Int           @map("balance_paise")
+  method       PaymentMethod
+  reference    String?
+  notes        String?
+  receivedBy   String?       @map("received_by") @db.Uuid
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, receiptNo])
+  @@index([tenantId, patientId])
+  @@index([tenantId, createdAt])
+  @@map("patient_advances")
   @@schema("hms")
 }
 

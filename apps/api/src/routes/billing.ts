@@ -5,9 +5,9 @@ import { taxInside, type PaymentGateway } from "@hms/billing-core";
 import { enqueueManual } from "@hms/notifications";
 import { effectivePlan, hasFeature } from "@hms/billing-core";
 import { withTenant, type PrismaClient, type TenantTx } from "@hms/db";
-import { createInvoice, invoiceInclude, istDay, recordPayment, refundInvoice } from "../billing";
+import { adjustPatientAdvance, createInvoice, createPatientAdvance, invoiceInclude, istDay, recordPayment, refundInvoice } from "../billing";
 import { authorize, inScope } from "../authz";
-import { gstInvoicePdf, patientInvoicePdf, thermalReceiptPdf } from "../pdf";
+import { advanceReceiptPdf, gstInvoicePdf, patientInvoicePdf, thermalReceiptPdf } from "../pdf";
 import { loadPharmBill } from "../pharmBill";
 import { staff, staffGuard, todayIst } from "../guards";
 
@@ -119,15 +119,138 @@ export default async function billingRoutes(app: FastifyInstance, { db, gateway 
 
   app.post("/invoices/:id/payments", { preHandler: staffGuard("billing:write") }, async (req, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const input = paymentInput.parse(req.body);
+    const bodySchema = z.object({
+      amountPaise: z.number().int().min(1),
+      method: z.enum(["CASH", "UPI", "CARD", "INSURANCE", "CHEQUE", "BANK_TRANSFER", "ADVANCE"]),
+      reference: z.string().trim().max(80).optional(),
+    });
+    const input = bodySchema.parse(req.body);
     const tenantId = staff(req).tid;
     const updated = await withTenant(db, tenantId, async (tx) => {
-      if (!(await tx.invoice.findFirst({ where: { id, ...inScope(req) }, select: { id: true } }))) throw httpError(404, "Invoice not found");
+      const inv = await tx.invoice.findFirst({ where: { id, ...inScope(req) } });
+      if (!inv) throw httpError(404, "Invoice not found");
       authorize(req, "billing:write", { amountPaise: input.amountPaise });
-      await recordPayment(tx, tenantId, id, { ...input, receivedBy: staff(req).sub });
+
+      if (input.method === "ADVANCE") {
+        if (!inv.patientId) throw httpError(400, "Cannot pay from advance for walk-in customer without patient profile");
+        await adjustPatientAdvance(tx, tenantId, id, inv.patientId, input.amountPaise, staff(req).sub);
+      } else {
+        await recordPayment(tx, tenantId, id, {
+          amountPaise: input.amountPaise,
+          method: input.method,
+          reference: input.reference,
+          receivedBy: staff(req).sub,
+        });
+      }
       return tx.invoice.findUniqueOrThrow({ where: { id }, include: invoiceInclude });
     });
     return reply.code(201).send(updated);
+  });
+
+  // ── Patient Advances / Deposits ──
+
+  app.post("/patients/:id/advances", { preHandler: staffGuard("billing:write") }, async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const body = z.object({
+      amountPaise: z.number().int().min(100),
+      method: z.enum(["CASH", "UPI", "CARD", "INSURANCE", "CHEQUE", "BANK_TRANSFER"]),
+      reference: z.string().trim().max(80).optional(),
+      notes: z.string().trim().max(300).optional(),
+    }).parse(req.body);
+
+    const tenantId = staff(req).tid;
+    return withTenant(db, tenantId, async (tx) => {
+      const patient = await tx.patient.findUnique({ where: { id } });
+      if (!patient) throw httpError(404, "Patient not found");
+
+      const adv = await createPatientAdvance(tx, {
+        tenantId,
+        patientId: id,
+        amountPaise: body.amountPaise,
+        method: body.method,
+        reference: body.reference,
+        notes: body.notes,
+        receivedBy: staff(req).sub,
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorIdentityId: staff(req).sub,
+          action: "patient.advance",
+          entity: "patient_advance",
+          entityId: adv.id,
+          meta: { receiptNo: adv.receiptNo, amountPaise: adv.amountPaise },
+        },
+      });
+
+      return reply.code(201).send(adv);
+    });
+  });
+
+  app.get("/patients/:id/advances", { preHandler: staffGuard("billing:read") }, async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const tenantId = staff(req).tid;
+    return withTenant(db, tenantId, async (tx) => {
+      const advances = await tx.patientAdvance.findMany({
+        where: { tenantId, patientId: id },
+        orderBy: { createdAt: "desc" },
+      });
+      const totalAdvancePaise = advances.reduce((s, a) => s + a.amountPaise, 0);
+      const availableBalancePaise = advances.reduce((s, a) => s + a.balancePaise, 0);
+      return { advances, totalAdvancePaise, availableBalancePaise };
+    });
+  });
+
+  app.get("/billing/advances", { preHandler: staffGuard("billing:read") }, async (req) => {
+    return withTenant(db, staff(req).tid, async (tx) => {
+      return tx.patientAdvance.findMany({
+        include: { patient: { select: { id: true, fullName: true, patientNo: true, phone: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      });
+    });
+  });
+
+  app.get("/advances/:id/receipt.pdf", { preHandler: staffGuard("billing:read") }, async (req, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+    const tenantId = staff(req).tid;
+    const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const profile = await db.tenantProfile.findUnique({ where: { tenantId } });
+
+    const adv = await withTenant(db, tenantId, async (tx) => {
+      return tx.patientAdvance.findUnique({
+        where: { id },
+        include: { patient: { select: { fullName: true, patientNo: true, phone: true } } },
+      });
+    });
+    if (!adv) throw httpError(404, "Advance receipt not found");
+
+    const pdf = await advanceReceiptPdf({
+      hospital: {
+        name: profile?.legalName || tenant.name,
+        address: profile?.addressLine1,
+        phone: profile?.contactPhone,
+        gstin: profile?.gstin,
+      },
+      receiptNo: adv.receiptNo,
+      createdAt: adv.createdAt,
+      patient: {
+        name: adv.patient.fullName,
+        patientNo: adv.patient.patientNo,
+        phone: adv.patient.phone,
+      },
+      amountPaise: adv.amountPaise,
+      balancePaise: adv.balancePaise,
+      method: adv.method,
+      reference: adv.reference,
+      notes: adv.notes,
+    });
+
+    return reply
+      .header("content-type", "application/pdf")
+      .header("content-disposition", `inline; filename="receipt-${adv.receiptNo}.pdf"`)
+      .send(pdf);
   });
 
   // Void is only possible before any money is taken. Refunds are handled outside the system for now.
@@ -208,7 +331,7 @@ export default async function billingRoutes(app: FastifyInstance, { db, gateway 
     return withTenant(db, staff(req).tid, async (tx) => {
       const payments = await tx.payment.groupBy({ by: ["method"], where: payWhere(req, from, to), _sum: { amountPaise: true }, _count: { _all: true } });
       const refunds = await tx.refund.groupBy({ by: ["method"], where: refWhere(req, from, to), _sum: { amountPaise: true } });
-      const byMethod = { CASH: 0, UPI: 0, CARD: 0 } as Record<string, number>;
+      const byMethod = { CASH: 0, UPI: 0, CARD: 0, INSURANCE: 0, CHEQUE: 0, BANK_TRANSFER: 0 } as Record<string, number>;
       for (const p of payments) byMethod[p.method] = p._sum.amountPaise ?? 0;
       const refunded = refunds.reduce((a, r) => a + (r._sum.amountPaise ?? 0), 0);
       for (const r of refunds) byMethod[r.method] = (byMethod[r.method] ?? 0) - (r._sum.amountPaise ?? 0); // money handed back is not collected

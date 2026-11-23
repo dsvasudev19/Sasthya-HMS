@@ -239,4 +239,75 @@ describe("laboratory", () => {
     const t2 = await staffToken(app, l2.phone);
     assert.equal(((await call(t2, "GET", "/lab/orders")).body as unknown[]).length, 0);
   });
+
+  it("handles sample barcode, sample rejection and recollection, stats, and report PDF", async () => {
+    const p = await newPatient("Lab Advanced Patient");
+    const tests = (await call(lab, "GET", "/lab/tests")).body as { id: string; code: string }[];
+    const hbTest = tests.find((t) => t.code === "HB")!;
+
+    // 1. Order lab test
+    const orderRes = await call(lab, "POST", "/lab/orders", {
+      patientId: p.id,
+      testIds: [hbTest.id],
+      sampleBarcode: "SPEC-2026-001",
+    });
+    assert.equal(orderRes.status, 201);
+    const orderId = orderRes.body.id as string;
+
+    // 2. Collect sample with barcode
+    const collectRes = await call(lab, "POST", `/lab/orders/${orderId}/collect`, {
+      sampleBarcode: "SPEC-BAR-999",
+    });
+    assert.equal(collectRes.status, 200);
+    assert.equal(collectRes.body.status, "COLLECTED");
+    assert.equal(collectRes.body.sampleBarcode, "SPEC-BAR-999");
+
+    // 3. Reject sample (e.g. Hemolyzed specimen)
+    const rejectRes = await call(lab, "POST", `/lab/orders/${orderId}/sample-reject`, {
+      reason: "Grossly hemolyzed, recollection required",
+    });
+    assert.equal(rejectRes.status, 200);
+    assert.equal(rejectRes.body.status, "ORDERED", "reverts to ORDERED so tech can recollect");
+    assert.equal(rejectRes.body.rejectionReason, "Grossly hemolyzed, recollection required");
+
+    // 4. Recollect sample
+    const recollectRes = await call(lab, "POST", `/lab/orders/${orderId}/collect`, {
+      sampleBarcode: "SPEC-BAR-1000",
+    });
+    assert.equal(recollectRes.status, 200);
+    assert.equal(recollectRes.body.status, "COLLECTED");
+
+    // 5. Result the test with critical value
+    const resultRes = await call(lab, "PUT", `/lab/orders/${orderId}/results`, {
+      results: [{ itemId: recollectRes.body.items[0].id, resultValue: 5.2, notes: "Confirmed on repeat" }],
+    });
+    assert.equal(resultRes.status, 200);
+    assert.equal(resultRes.body.status, "RESULTED");
+    assert.equal(resultRes.body.items[0].flag, "CRITICAL_LOW");
+
+    // 6. Check lab stats
+    const statsRes = await call(lab, "GET", "/lab/stats");
+    assert.equal(statsRes.status, 200);
+    assert.ok(typeof statsRes.body.critical === "number");
+    assert.ok(statsRes.body.critical >= 1, "at least one critical flag observed");
+
+    // 7. Pay bill and release
+    await call(rec, "POST", `/invoices/${orderRes.body.invoice.id}/payments`, {
+      amountPaise: orderRes.body.invoice.totalPaise,
+      method: "CASH",
+    });
+    const releaseRes = await call(lab, "POST", `/lab/orders/${orderId}/release`, {});
+    assert.equal(releaseRes.status, 200);
+    assert.equal(releaseRes.body.status, "RELEASED");
+
+    // 8. Stream high-fidelity diagnostic lab report PDF
+    const pdfRes = await app.inject({
+      method: "GET",
+      url: `/lab/orders/${orderId}/report.pdf`,
+      headers: auth(lab),
+    });
+    assert.equal(pdfRes.statusCode, 200);
+    assert.equal(pdfRes.headers["content-type"], "application/pdf");
+    assert.ok(pdfRes.rawPayload.length > 500, "valid PDF buffer");
+  });
 });

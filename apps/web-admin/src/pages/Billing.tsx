@@ -1,16 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Plus, Search } from 'lucide-react'
+import { FileDown, Plus, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import InvoiceModal from '../components/InvoiceModal'
 import NewInvoiceModal from '../components/NewInvoiceModal'
+import NewAdvanceModal from '../components/NewAdvanceModal'
 import Select from '../components/Select'
 import { Button, Field, inputCls } from '../components/ui'
-import { api } from '../lib/api'
+import { api, openFile } from '../lib/api'
 import { fmtDate, rupees } from '../lib/format'
-import type { Closing, Collections, InvoiceRow } from '../lib/types'
+import type { Closing, Collections, InvoiceRow, PatientAdvance } from '../lib/types'
 
 const BADGE = { PAID: 'bg-brand-100 text-brand-700', PARTIAL: 'bg-amber-100 text-amber-700', UNPAID: 'bg-red-100 text-red-600', REFUNDED: 'bg-stone-200 text-stone-600', VOID: 'bg-stone-200 text-stone-600' } as const
 const today = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
@@ -119,19 +120,113 @@ function CollectionsTab() {
   )
 }
 
+function AdvancesTab() {
+  const [q, setQ] = useState('')
+  const [adding, setAdding] = useState(false)
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['advances'],
+    queryFn: () => api<PatientAdvance[]>('/billing/advances'),
+  })
+
+  const filtered = data.filter((a) => {
+    if (!q.trim()) return true
+    const term = q.toLowerCase()
+    return (
+      a.receiptNo.toLowerCase().includes(term) ||
+      a.patient?.fullName.toLowerCase().includes(term) ||
+      (a.patient?.patientNo && a.patient.patientNo.toLowerCase().includes(term))
+    )
+  })
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="ml-auto flex min-w-60 items-center gap-2 rounded-full bg-surface px-4 py-2.5 ring-1 ring-line">
+          <Search size={16} className="text-muted" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search receipt no or patient"
+            className="w-full bg-transparent text-sm outline-none"
+          />
+        </div>
+        <Button onClick={() => setAdding(true)}>
+          <Plus size={18} /> Record advance deposit
+        </Button>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl ring-1 ring-line">
+        <table className="w-full min-w-[760px] text-left text-sm">
+          <thead className="bg-surface text-xs font-semibold">
+            <tr>
+              {['Receipt No', 'Patient', 'Date', 'Deposit Amount', 'Available Balance', 'Method', ''].map((h) => (
+                <th key={h} className="px-4 py-3.5">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {filtered.map((a) => (
+              <tr key={a.id} className="hover:bg-surface/60">
+                <td className="px-4 py-3.5 font-semibold text-brand-800">{a.receiptNo}</td>
+                <td className="px-4 py-3.5">
+                  <p className="font-medium">{a.patient?.fullName ?? 'Unknown'}</p>
+                  <p className="text-xs text-muted">{a.patient?.patientNo}</p>
+                </td>
+                <td className="px-4 py-3.5 text-muted">{fmtDate(a.createdAt)}</td>
+                <td className="px-4 py-3.5 font-semibold">{rupees(a.amountPaise)}</td>
+                <td className="px-4 py-3.5">
+                  <span
+                    className={clsx(
+                      'rounded-full px-2.5 py-0.5 text-xs font-semibold',
+                      a.balancePaise > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-stone-200 text-stone-600'
+                    )}
+                  >
+                    {a.balancePaise > 0 ? rupees(a.balancePaise) + ' available' : 'Fully adjusted'}
+                  </span>
+                </td>
+                <td className="px-4 py-3.5 text-xs font-medium text-muted">
+                  {a.method} {a.reference ? `· ${a.reference}` : ''}
+                </td>
+                <td className="px-4 py-3.5 text-right">
+                  <Button
+                    variant="ghost"
+                    className="!px-3 !py-1 text-xs"
+                    onClick={() => void openFile(`/advances/${a.id}/receipt.pdf`)}
+                  >
+                    <FileDown size={14} /> Receipt
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!isLoading && filtered.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted">No advance deposits recorded yet.</p>
+        )}
+      </div>
+
+      {adding && <NewAdvanceModal onClose={() => setAdding(false)} />}
+    </div>
+  )
+}
+
 export default function Billing() {
-  const [tab, setTab] = useState<'invoices' | 'collections'>('invoices')
+  const [tab, setTab] = useState<'invoices' | 'advances' | 'collections'>('invoices')
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center gap-4">
         <h1 className="text-3xl font-semibold tracking-tight">Billing</h1>
         <div className="flex rounded-full bg-surface p-1 ring-1 ring-line">
-          {([['invoices', 'Bills'], ['collections', 'Collections']] as const).map(([k, label]) => (
+          {([['invoices', 'Bills'], ['advances', 'Patient Advances'], ['collections', 'Collections']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className={clsx('rounded-full px-5 py-2 text-sm font-medium', tab === k ? 'bg-white text-brand-700 shadow-sm' : 'text-muted')}>{label}</button>
           ))}
         </div>
       </div>
-      {tab === 'invoices' ? <Invoices /> : <CollectionsTab />}
+      {tab === 'invoices' ? <Invoices /> : tab === 'advances' ? <AdvancesTab /> : <CollectionsTab />}
     </div>
   )
 }

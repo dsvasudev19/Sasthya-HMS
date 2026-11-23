@@ -1,3 +1,4 @@
+import type { PaymentMethod } from "@hms/contracts";
 import { nextSeq, type TenantTx } from "@hms/db";
 import { createInvoice, type BranchRef } from "./billing";
 import { httpError } from "./util";
@@ -34,7 +35,7 @@ export const orderInclude = {
 /** Creates a lab order with its bill. The price of each test is copied onto the order. */
 export async function createLabOrder(
   tx: TenantTx,
-  o: { tenantId: string; prefix: string; branch: BranchRef; patientId: string; consultationId?: string; testIds: string[]; orderedBy?: string; payment?: { method: "CASH" | "UPI" | "CARD" } },
+  o: { tenantId: string; prefix: string; branch: BranchRef; patientId: string; consultationId?: string; testIds: string[]; orderedBy?: string; payment?: { method: PaymentMethod } },
 ) {
   const ids = [...new Set(o.testIds)];
   const tests = await tx.labTest.findMany({ where: { id: { in: ids }, active: true } });

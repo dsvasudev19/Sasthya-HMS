@@ -142,4 +142,70 @@ describe("billing", () => {
     await assert.rejects(appDb.$executeRawUnsafe(`DELETE FROM hms.payments`), /permission denied/);
     await assert.rejects(appDb.$executeRawUnsafe(`UPDATE hms.payments SET amount_paise = 1`), /permission denied/);
   });
+
+  it("handles patient advances, receipt printing, and adjusting against invoices", async () => {
+    const p = await newPatient("Advance Deposit Patient");
+
+    // 1. Record an advance deposit of Rs 500 (50,000 paise) via UPI
+    const advRes = await mine("POST", `/patients/${p.id}/advances`, {
+      amountPaise: 50_000,
+      method: "UPI",
+      reference: "ADV-UPI-001",
+      notes: "Admission deposit",
+    });
+    assert.equal(advRes.status, 201);
+    assert.equal(advRes.body.amountPaise, 50_000);
+    assert.equal(advRes.body.balancePaise, 50_000);
+    assert.ok(advRes.body.receiptNo.startsWith("ADV-"));
+    const advId = advRes.body.id as string;
+
+    // 2. Fetch patient advances and total available balance
+    const listRes = await mine("GET", `/patients/${p.id}/advances`);
+    assert.equal(listRes.status, 200);
+    assert.equal(listRes.body.totalAdvancePaise, 50_000);
+    assert.equal(listRes.body.availableBalancePaise, 50_000);
+    assert.equal(listRes.body.advances.length, 1);
+
+    // 3. Stream advance deposit PDF receipt
+    const pdfRes = await app.inject({
+      method: "GET",
+      url: `/advances/${advId}/receipt.pdf`,
+      headers: auth(tok),
+    });
+    assert.equal(pdfRes.statusCode, 200);
+    assert.equal(pdfRes.headers["content-type"], "application/pdf");
+    assert.ok(pdfRes.rawPayload.length > 500, "valid PDF buffer");
+
+    // 4. Create an invoice of Rs 300 (30,000 paise)
+    const invRes = await mine("POST", "/invoices", {
+      patientId: p.id,
+      lines: [{ description: "Bed & Nursing Charges", unitPaise: 30_000, quantity: 1 }],
+    });
+    assert.equal(invRes.status, 201);
+    const invId = invRes.body.id as string;
+
+    // 5. Adjust Rs 300 from patient advance
+    const adjustRes = await mine("POST", `/invoices/${invId}/payments`, {
+      amountPaise: 30_000,
+      method: "ADVANCE",
+    });
+    assert.equal(adjustRes.status, 201);
+    assert.equal(adjustRes.body.status, "PAID");
+    assert.equal(adjustRes.body.paidPaise, 30_000);
+
+    // 6. Check updated advance balance: 50,000 - 30,000 = 20,000 paise remaining
+    const updatedAdv = await mine("GET", `/patients/${p.id}/advances`);
+    assert.equal(updatedAdv.body.availableBalancePaise, 20_000);
+
+    // 7. Creating another invoice of Rs 250 and trying to adjust Rs 250 when only 200 is available fails
+    const inv2 = (await mine("POST", "/invoices", {
+      patientId: p.id,
+      lines: [{ description: "Consultation", unitPaise: 25_000, quantity: 1 }],
+    })).body;
+    const overAdjust = await mine("POST", `/invoices/${inv2.id}/payments`, {
+      amountPaise: 25_000,
+      method: "ADVANCE",
+    });
+    assert.equal(overAdjust.status, 400);
+  });
 });

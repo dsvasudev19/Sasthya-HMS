@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { labResultsInput, labTestInput, labTestPatch, releaseInput, walkInLabOrderInput } from "@hms/contracts";
+import { labResultsInput, labTestInput, labTestPatch, releaseInput, sampleRejectInput, walkInLabOrderInput } from "@hms/contracts";
 import { withTenant, type PrismaClient } from "@hms/db";
 import { featureGate } from "../gates";
 import { authorize, hasPermission, inScope } from "../authz";
 import { staff, staffGuard } from "../guards";
 import { createLabOrder, flagFor, orderInclude } from "../lab";
 import { reportReady } from "../notify";
+import { labReportPdf } from "../pdf";
 import { httpError, prefixOf } from "../util";
 
 const idParam = z.object({ id: z.string().uuid() });
@@ -55,11 +56,48 @@ export default async function labRoutes(app: FastifyInstance, { db }: { db: Pris
 
   app.post("/lab/orders/:id/collect", { preHandler: staffGuard("lab:write") }, async (req) => {
     const { id } = idParam.parse(req.params);
+    const body = z.object({ sampleBarcode: z.string().trim().max(40).optional() }).parse(req.body ?? {});
     return withTenant(db, staff(req).tid, async (tx) => {
       const o = await tx.labOrder.findFirst({ where: { id, ...inScope(req) } });
       if (!o) throw httpError(404, "Order not found");
       if (o.status !== "ORDERED") throw httpError(409, `Order is already ${o.status.toLowerCase()}`);
-      return tx.labOrder.update({ where: { id }, data: { status: "COLLECTED", collectedAt: new Date() }, include: orderInclude });
+      return tx.labOrder.update({
+        where: { id },
+        data: {
+          status: "COLLECTED",
+          collectedAt: new Date(),
+          sampleBarcode: body.sampleBarcode ?? o.sampleBarcode,
+        },
+        include: orderInclude,
+      });
+    });
+  });
+
+  app.post("/lab/orders/:id/sample-reject", { preHandler: staffGuard("lab:write") }, async (req) => {
+    const { id } = idParam.parse(req.params);
+    const { reason } = sampleRejectInput.parse(req.body);
+    const tenantId = staff(req).tid;
+    return withTenant(db, tenantId, async (tx) => {
+      const o = await tx.labOrder.findFirst({ where: { id, ...inScope(req) } });
+      if (!o) throw httpError(404, "Order not found");
+      if (o.status !== "COLLECTED") throw httpError(409, "Only collected samples can be rejected");
+
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorIdentityId: staff(req).sub,
+          action: "lab.sample_reject",
+          entity: "lab_order",
+          entityId: id,
+          meta: { reason },
+        },
+      });
+
+      return tx.labOrder.update({
+        where: { id },
+        data: { status: "ORDERED", collectedAt: null, rejectionReason: reason },
+        include: orderInclude,
+      });
     });
   });
 
@@ -127,5 +165,83 @@ export default async function labRoutes(app: FastifyInstance, { db }: { db: Pris
       if (o.invoice) await tx.invoice.update({ where: { id: o.invoice.id }, data: { status: "VOID", voidedAt: new Date() } });
       return tx.labOrder.update({ where: { id }, data: { status: "CANCELLED" }, include: orderInclude });
     });
+  });
+
+  app.get("/lab/stats", { preHandler: staffGuard("lab:read") }, async (req) => {
+    return withTenant(db, staff(req).tid, async (tx) => {
+      const [ordered, collected, resulted, released, critical] = await Promise.all([
+        tx.labOrder.count({ where: { ...inScope(req), status: "ORDERED" } }),
+        tx.labOrder.count({ where: { ...inScope(req), status: "COLLECTED" } }),
+        tx.labOrder.count({ where: { ...inScope(req), status: "RESULTED" } }),
+        tx.labOrder.count({ where: { ...inScope(req), status: "RELEASED" } }),
+        tx.labOrderItem.count({ where: { order: inScope(req), flag: { in: ["CRITICAL_LOW", "CRITICAL_HIGH"] } } }),
+      ]);
+      return { ordered, collected, resulted, released, critical };
+    });
+  });
+
+  app.get("/lab/orders/:id/report.pdf", { preHandler: staffGuard("lab:read") }, async (req, reply) => {
+    const { id } = idParam.parse(req.params);
+    const tenantId = staff(req).tid;
+    const tenant = await db.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    const profile = await db.tenantProfile.findUnique({ where: { tenantId } });
+
+    const order = await withTenant(db, tenantId, async (tx) => {
+      return tx.labOrder.findFirst({
+        where: { id, ...inScope(req) },
+        include: {
+          ...orderInclude,
+          branch: { select: { name: true, address: true, phone: true } },
+          consultation: { include: { appointment: { include: { doctor: { select: { fullName: true } } } } } },
+        },
+      });
+    });
+    if (!order) throw httpError(404, "Lab order not found");
+
+    const releasedStaff = order.releasedBy ? await db.identity.findUnique({ where: { id: order.releasedBy } }) : null;
+
+    const pdf = await labReportPdf({
+      hospital: {
+        name: profile?.legalName || tenant.name,
+        branchName: order.branch.name,
+        address: profile?.addressLine1 || order.branch.address,
+        phone: profile?.contactPhone || order.branch.phone,
+        gstin: profile?.gstin,
+      },
+      order: {
+        orderNo: order.orderNo,
+        sampleBarcode: order.sampleBarcode,
+        createdAt: order.createdAt,
+        collectedAt: order.collectedAt,
+        releasedAt: order.releasedAt,
+        doctor: order.consultation?.appointment?.doctor?.fullName,
+        clinicalNotes: order.clinicalNotes,
+      },
+      patient: {
+        name: order.patient.fullName,
+        patientNo: order.patient.patientNo,
+        gender: order.patient.gender,
+        dob: order.patient.dateOfBirth,
+        phone: order.patient.phone,
+      },
+      items: order.items.map((i) => ({
+        testName: i.testName,
+        unit: i.unit,
+        refRange: i.refRange,
+        resultText: i.resultText,
+        resultValue: i.resultValue ? i.resultValue.toString() : null,
+        flag: i.flag,
+        notes: i.notes,
+        method: i.method,
+      })),
+      releasedBy: {
+        name: releasedStaff?.fullName || "Pathologist On Duty",
+      },
+    });
+
+    return reply
+      .header("content-type", "application/pdf")
+      .header("content-disposition", `inline; filename="lab-report-${order.orderNo}.pdf"`)
+      .send(pdf);
   });
 }

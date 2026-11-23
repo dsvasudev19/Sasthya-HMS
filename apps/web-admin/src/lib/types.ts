@@ -92,13 +92,13 @@ export interface InvoiceDetail extends InvoiceRow {
   note: string | null
   patient: (NonNullable<InvoiceRow['patient']> & { phone: string | null }) | null
   lines: { id: string; description: string; quantity: number; unitPaise: number; amountPaise: number }[]
-  payments: { id: string; amountPaise: number; method: 'CASH' | 'UPI' | 'CARD'; reference: string | null; receivedAt: string }[]
+  payments: { id: string; amountPaise: number; method: string; reference: string | null; receivedAt: string }[]
 }
 export interface Collections {
   date: string
   collectedPaise: number
   refundedPaise: number
-  byMethod: Record<'CASH' | 'UPI' | 'CARD', number>
+  byMethod: Record<string, number>
   paymentCount: number
   invoicesIssued: number
   billedPaise: number
@@ -113,6 +113,28 @@ export interface Closing {
   differencePaise: number
   totalCollectedPaise: number
   notes: string | null
+}
+
+export interface PatientAdvance {
+  id: string
+  receiptNo: string
+  patientId: string
+  amountPaise: number
+  balancePaise: number
+  method: string
+  reference?: string | null
+  notes?: string | null
+  createdAt: string
+  patient?: { id: string; fullName: string; patientNo: string; phone?: string | null }
+}
+
+export interface FeeItem {
+  id: string
+  code: string
+  name: string
+  kind: string
+  pricePaise: number
+  active: boolean
 }
 
 export interface Vitals { bpSystolic?: number; bpDiastolic?: number; pulse?: number; tempC?: number; spo2?: number; weightKg?: number; heightCm?: number }
@@ -137,13 +159,19 @@ export interface LabItem {
   resultValue: string | null
   flag: 'NORMAL' | 'LOW' | 'HIGH' | 'CRITICAL_LOW' | 'CRITICAL_HIGH' | null
   notes: string | null
+  method?: string | null
+  sampleBarcode?: string | null
   resultedAt: string | null
 }
 export interface LabOrder {
   id: string
   orderNo: string
+  sampleBarcode?: string | null
+  clinicalNotes?: string | null
+  rejectionReason?: string | null
   status: 'ORDERED' | 'COLLECTED' | 'RESULTED' | 'RELEASED' | 'CANCELLED'
   createdAt: string
+  collectedAt: string | null
   releasedAt: string | null
   patient: { id: string; fullName: string; patientNo: string; phone: string | null; dateOfBirth: string | null; gender: string | null }
   invoice: { id: string; invoiceNo: string; status: InvoiceStatus; totalPaise: number; paidPaise: number } | null
@@ -153,11 +181,17 @@ export interface LabTest {
   id: string
   code: string
   name: string
+  department?: string | null
   sampleType: string
+  method?: string | null
   pricePaise: number
   unit: string | null
   refLow: string | null
   refHigh: string | null
+  critLow?: string | null
+  critHigh?: string | null
+  turnaroundHours?: number | null
+  active?: boolean
 }
 export interface Consultation {
   id: string

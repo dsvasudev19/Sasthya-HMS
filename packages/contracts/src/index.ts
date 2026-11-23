@@ -50,7 +50,7 @@ const phone = z.string().regex(/^[6-9]\d{9}$/, "Enter a 10-digit Indian mobile n
 export const otpRequestInput = z.object({ phone });
 export const otpVerifyInput = z.object({ phone, code: z.string().regex(/^\d{6}$/) });
 
-export const paymentMethodSchema = z.enum(["CASH", "UPI", "CARD"]);
+export const paymentMethodSchema = z.enum(["CASH", "UPI", "CARD", "INSURANCE", "CHEQUE", "BANK_TRANSFER"]);
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>;
 
 export const issueCardInput = z.object({
@@ -94,6 +94,13 @@ export const createInvoiceInput = z.object({
 export const paymentInput = z.object({ amountPaise: paise.min(1), method: paymentMethodSchema, reference: z.string().trim().max(80).optional() });
 export const closingInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), countedCashPaise: paise, notes: z.string().trim().max(300).optional() });
 export const updateFeeInput = z.object({ pricePaise: paise });
+export const patientAdvanceInput = z.object({
+  patientId: z.string().uuid(),
+  amountPaise: paise.min(1),
+  method: paymentMethodSchema,
+  reference: z.string().trim().max(80).optional(),
+  notes: z.string().trim().max(300).optional(),
+});
 
 // ── clinical ──
 const num = (min: number, max: number) => z.number().min(min).max(max);
@@ -227,17 +234,21 @@ const decimal = z.number().min(-1e9).max(1e9);
 export const labTestInput = z.object({
   code: z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{2,20}$/),
   name: z.string().trim().min(2).max(120),
+  department: z.string().trim().max(60).optional(),
   sampleType: z.enum(["BLOOD", "URINE", "STOOL", "SWAB", "OTHER"]).default("BLOOD"),
+  method: z.string().trim().max(60).optional(),
   pricePaise: z.number().int().min(0).max(10_000_000),
   unit: z.string().trim().max(20).optional(),
   refLow: decimal.optional().nullable(),
   refHigh: decimal.optional().nullable(),
   critLow: decimal.optional().nullable(),
   critHigh: decimal.optional().nullable(),
+  turnaroundHours: z.number().int().min(1).max(168).default(4),
 });
 export const labTestPatch = labTestInput.partial().extend({ active: z.boolean().optional() });
-export const labOrderInput = z.object({ testIds: z.array(z.string().uuid()).min(1).max(20) });
+export const labOrderInput = z.object({ testIds: z.array(z.string().uuid()).min(1).max(20), sampleBarcode: z.string().trim().max(40).optional(), clinicalNotes: z.string().trim().max(500).optional() });
 export const walkInLabOrderInput = labOrderInput.extend({ patientId: z.string().uuid(), payment: z.object({ method: paymentMethodSchema }).optional() });
+export const sampleRejectInput = z.object({ reason: z.string().trim().min(3).max(300) });
 export const labResultsInput = z.object({
   results: z.array(z.object({ itemId: z.string().uuid(), resultValue: decimal.optional(), resultText: z.string().trim().max(200).optional(), notes: z.string().trim().max(300).optional() })).min(1).max(30),
 });
